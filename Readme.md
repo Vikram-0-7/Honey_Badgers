@@ -8,7 +8,7 @@ git commit -m "changing"
 <br>
 git pull origin main
 <br>
-git push
+git push origin your_branch_name
 <br>
 
 <!-- vikram
