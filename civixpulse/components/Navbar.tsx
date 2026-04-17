@@ -42,7 +42,7 @@ export default async function Navbar() {
         <div className="flex items-center gap-6">
           {!user ? (
             <Link
-              href="/login"
+              href="/signup"
               className="group flex items-center gap-2 text-sm font-bold uppercase tracking-wider transition-opacity hover:opacity-70"
             >
               <User className="h-5 w-5" />

@@ -49,7 +49,7 @@ export default function LoginForm() {
       </p>
 
       <form className="flex flex-col gap-6" onSubmit={handleLogin}>
-        <div className="flex flex-col gap-2">
+        {/* <div className="flex flex-col gap-2">
           <label className="text-xs font-bold uppercase tracking-widest text-black">
             Role Identification
           </label>
@@ -68,7 +68,7 @@ export default function LoginForm() {
               </button>
             ))}
           </div>
-        </div>
+        </div> */}
 
         <div className="flex flex-col gap-2">
           <label className="text-xs font-bold uppercase tracking-widest text-black">
