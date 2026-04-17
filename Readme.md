@@ -8,5 +8,5 @@ git commit -m "changing"
 <br>
 git pull origin main
 <br>
-git push origin main
+git push origin your_branch_name
 <br>
