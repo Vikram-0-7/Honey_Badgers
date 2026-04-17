@@ -15,8 +15,57 @@ from agents.ingestion_agent import IngestionAgent
 from agents.priority_agent import PriorityAgent
 from agents.auditor_agent import AuditorAgent
 from agents.resolver_agent import ResolverAgent
-from models.complaint import Complaint, Cluster, PipelineResult, Alert, SeverityLevel
+from models.complaint import Complaint, Cluster, PipelineResult, Alert, SeverityLevel, Prediction, Correlation, CityHealth, TopRiskArea, MostAffectedCategory, SystemSummary
 from services.mock_data import generate_mock_complaints
+from collections import defaultdict
+
+
+def generate_predictions(complaints: list[Complaint]) -> list[Prediction]:
+    predictions = []
+    category_counts = defaultdict(int)
+    for c in complaints:
+        if c.category:
+            category_counts[c.category] += 1
+            
+    for category, count in category_counts.items():
+        if count >= 3:
+            predictions.append(Prediction(
+                category=category,
+                prediction=f"{category} failure likely in next 24 hours",
+                trend="increasing",
+                confidence="medium"
+            ))
+    return predictions
+
+
+def generate_correlations(complaints: list[Complaint]) -> list[Correlation]:
+    correlations = []
+    location_categories = defaultdict(set)
+    for c in complaints:
+        if c.location and c.category:
+            location_categories[c.location.lower()].add(c.category)
+            
+    for loc, cats in location_categories.items():
+        if len(cats) >= 2:
+            correlations.append(Correlation(
+                location=loc.title(),
+                correlation=f"{list(cats)[0]} issues affecting {list(cats)[1]} infrastructure",
+                departments=list(cats),
+                reason="Multiple categories detected in same region"
+            ))
+    return correlations
+
+
+def calculate_city_health(complaints: list[Complaint], clusters: list[Cluster]) -> CityHealth:
+    p1_count = sum(1 for c in complaints if c.severity == SeverityLevel.P1)
+    score = max(0, 100 - (p1_count * 10 + len(clusters) * 5))
+    if score > 80:
+        status = "Healthy"
+    elif score >= 50:
+        status = "Moderate Risk"
+    else:
+        status = "Critical"
+    return CityHealth(score=score, status=status)
 
 
 def run_pipeline(complaints: list[Complaint] | None = None) -> PipelineResult:
@@ -87,7 +136,9 @@ def run_pipeline(complaints: list[Complaint] | None = None) -> PipelineResult:
         if complaint.severity == SeverityLevel.P1:
             alerts.append(Alert(
                 type="CRITICAL_ALERT",
-                message="Immediate attention required: Critical P1 incident detected.",
+                message=f"Critical {complaint.category.lower()} issue detected in {complaint.location} — immediate action required",
+                severity="P1",
+                area=complaint.location,
                 complaint_id=complaint.id
             ))
 
@@ -107,7 +158,9 @@ def run_pipeline(complaints: list[Complaint] | None = None) -> PipelineResult:
         if cluster.count >= 3:
             alerts.append(Alert(
                 type="CLUSTER_ALERT",
-                message="Immediate attention required: Systemic infrastructure issue.",
+                message=f"Systemic {cluster.category.lower()} infrastructure failure in {cluster.affected_area}",
+                severity="HIGH",
+                area=cluster.affected_area,
                 cluster_id=cluster.cluster_id
             ))
 
@@ -122,6 +175,29 @@ def run_pipeline(complaints: list[Complaint] | None = None) -> PipelineResult:
 
     assignments: list[dict] = resolver_agent.process_batch(complaints)
     execution_log.append(f"Resolver: {len(assignments)} assignments made")
+
+    # ══════════════════════════════════════════════════════════
+    # PHASE 4: City Intelligence (Predictions, Correlations, Health)
+    # ══════════════════════════════════════════════════════════
+    print()
+    print("=" * 58)
+    print("  PHASE 4: CITY INTELLIGENCE")
+    print("=" * 58)
+    print()
+
+    predictions = generate_predictions(complaints)
+    for p in predictions:
+        execution_log.append(f"[PREDICTION] {p.category} complaints rising -> escalation likely")
+        print(f"[PREDICTION] {p.category} complaints rising -> escalation likely")
+
+    correlations = generate_correlations(complaints)
+    for c in correlations:
+        execution_log.append(f"[CORRELATION] Multi-department issue detected in {c.location}: {c.departments}")
+        print(f"[CORRELATION] Multi-department issue detected in {c.location}")
+
+    city_health = calculate_city_health(complaints, clusters)
+    execution_log.append(f"[CITY HEALTH] Score={city_health.score} -> {city_health.status}")
+    print(f"[CITY HEALTH] Score={city_health.score} -> {city_health.status}")
 
     # ══════════════════════════════════════════════════════════
     # SUMMARY
@@ -140,14 +216,42 @@ def run_pipeline(complaints: list[Complaint] | None = None) -> PipelineResult:
     print("+" + "-"*58 + "+")
     print()
 
-    # ── Category breakdown ──
+    # ── Category breakdown & System Summary ──
     category_counts: dict[str, int] = {}
     severity_counts: dict[str, int] = {}
+    area_risk_scores: dict[str, int] = defaultdict(int)
+    
     for c in complaints:
         cat = c.category or "Unknown"
         category_counts[cat] = category_counts.get(cat, 0) + 1
         sev = c.severity.value if c.severity else "Unclassified"
         severity_counts[sev] = severity_counts.get(sev, 0) + 1
+        
+        loc = c.location.lower()
+        area_risk_scores[loc] += 2 if sev == "P1" else 1
+
+    for cl in clusters:
+        area_risk_scores[cl.affected_area.lower()] += 5
+
+    most_affected_cat_name = max(category_counts, key=category_counts.get) if category_counts else "Unknown"
+    most_affected_category = MostAffectedCategory(
+        category=most_affected_cat_name, 
+        count=category_counts.get(most_affected_cat_name, 0)
+    )
+
+    top_risk_area_name = max(area_risk_scores, key=area_risk_scores.get) if area_risk_scores else "Unknown"
+    top_risk_area = TopRiskArea(
+        area=top_risk_area_name.title(),
+        reason=f"High concentration of critical issues and systemic clusters"
+    )
+
+    system_summary = SystemSummary(
+        total_complaints=len(complaints),
+        critical_issues=severity_counts.get("P1", 0),
+        clusters=len(clusters),
+        top_risk_area=top_risk_area.area,
+        city_health_score=city_health.score
+    )
 
     print("[Category Breakdown]")
     for cat, count in sorted(category_counts.items()):
@@ -168,6 +272,12 @@ def run_pipeline(complaints: list[Complaint] | None = None) -> PipelineResult:
         complaints=complaints,
         clusters=clusters,
         alerts=alerts,
+        predictions=predictions,
+        correlations=correlations,
+        city_health=city_health,
+        top_risk_area=top_risk_area,
+        most_affected_category=most_affected_category,
+        system_summary=system_summary,
         officer_assignments=assignments,
         execution_log=execution_log,
     )
