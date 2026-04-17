@@ -25,18 +25,34 @@ export default function LoginForm() {
       password,
     });
 
-    setLoading(false);
-
     if (error) {
       alert(error.message);
+      setLoading(false);
       return;
     }
 
-    // Optional: store role locally (since no backend)
-    localStorage.setItem("role", role);
+    // 🔥 Get logged in user
+    const { data: userData } = await supabase.auth.getUser();
 
-    // Redirect after login
-    router.push("/");
+    // 🔥 Fetch role from DB
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", userData?.user?.id)
+      .single();
+
+    const role = profile?.role;
+
+    setLoading(false);
+
+    // 🔥 Redirect based on role
+    if (role === "admin") {
+      router.push("/admin/dashboard");
+    } else if (role === "officer") {
+      router.push("/officer/tasks");
+    } else {
+      router.push("/dashboard");
+    }
   };
 
   return (
