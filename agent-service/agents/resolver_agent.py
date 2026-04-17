@@ -76,9 +76,16 @@ class ResolverAgent:
         complaint.status = ComplaintStatus.ASSIGNED
         complaint.assigned_at = datetime.utcnow().isoformat()
         complaint.updated_at = complaint.assigned_at
-        complaint.sla_status = "on_time"
         
-        reason_msg = f"Assigned to {officer_info['name']} based on department ({category}) availability."
+        # Determine SLA breach status (mock validation, normally runs on cron)
+        assigned_dt = datetime.fromisoformat(complaint.assigned_at)
+        time_diff_hours = (datetime.utcnow() - assigned_dt).total_seconds() / 3600
+        if time_diff_hours > complaint.sla_deadline_hours:
+            complaint.sla_status = "breach"
+        else:
+            complaint.sla_status = "on_time"
+        
+        reason_msg = f"Assigned to {officer_info['name']} based on best performance in department."
         if complaint.reason:
             complaint.reason += " -> " + reason_msg
         else:

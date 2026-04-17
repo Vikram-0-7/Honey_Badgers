@@ -11,6 +11,7 @@ Future: Will use PostGIS ST_DWithin for 500m radius spatial clustering
 
 from collections import defaultdict
 from models.complaint import Complaint, Cluster
+from services.llm_service import analyze_with_llm
 from math import radians, cos, sin, asin, sqrt
 
 
@@ -48,7 +49,7 @@ RECOMMENDED_ACTIONS = {
 }
 
 # Minimum complaints to form a cluster
-CLUSTER_THRESHOLD = 2  # Set to 2 for demo (spec says 3, but we want clusters to appear with our mock data)
+CLUSTER_THRESHOLD = 3  # Cluster forms ONLY if complaints >= 3
 
 # Maximum distance in km to consider complaints as geographically related
 MAX_DISTANCE_KM = 5.0
@@ -103,14 +104,43 @@ class AuditorAgent:
 
             for geo_group in geo_clusters:
                 if len(geo_group) >= CLUSTER_THRESHOLD:
-                    # Step 4: Create cluster
                     is_high_count = len(geo_group) >= 5
-                    root_cause_key = "high_count" if is_high_count else "default"
-                    templates = ROOT_CAUSE_TEMPLATES.get(category, ROOT_CAUSE_TEMPLATES.get("Safety"))
-                    root_cause = templates.get(root_cause_key, templates["default"])
+                    
+                    # ── LLM Root Cause Inference ──
+                    complaint_texts = [f"- {c.text}" for c in geo_group]
+                    complaints_str = "\n".join(complaint_texts)
+                    
+                    prompt = f"""
+Analyze the following cluster of {len(geo_group)} civic complaints in the '{category}' category.
+They are located in the same geographic region ({geo_group[0].location}).
+Return ONLY a valid JSON object matching this schema exactly:
+{{
+  "root_cause": "<A likely root cause explaining why these happened together>",
+  "insight": "<A brief one-sentence analytical insight>",
+  "confidence": "<Must be one of: High, Moderate, Low>"
+}}
 
-                    insight_text = f"Multiple {category.lower()} complaints detected in same geographic region."
-                    reason_msg = f"Geographic proximity grouping matched {len(geo_group)} similar items."
+Complaints:
+{complaints_str}
+"""
+                    llm_data = analyze_with_llm(prompt)
+                    
+                    if llm_data and "root_cause" in llm_data and "insight" in llm_data:
+                        root_cause = llm_data['root_cause'].replace("[LLM]", "").strip()
+                        insight_text = llm_data['insight'].replace("[LLM]", "").strip()
+                        confidence = llm_data.get("confidence", "Moderate")
+                        reason_msg = f"Geographic proximity matched {len(geo_group)} items. LLM inferred root cause."
+                        predicted_issue = root_cause
+                    else:
+                        # ── Fallback Inference ──
+                        root_cause_key = "high_count" if is_high_count else "default"
+                        templates = ROOT_CAUSE_TEMPLATES.get(category, ROOT_CAUSE_TEMPLATES.get("Safety"))
+                        root_cause = templates.get(root_cause_key, templates["default"])
+    
+                        insight_text = f"Multiple {category.lower()} complaints detected in same geographic region."
+                        reason_msg = f"Geographic proximity grouping matched {len(geo_group)} similar items."
+                        confidence = "High" if len(geo_group) >= 3 else "Moderate"
+                        predicted_issue = root_cause
                     
                     cluster = Cluster(
                         category=category,
@@ -120,8 +150,8 @@ class AuditorAgent:
                         affected_area=f"{geo_group[0].location} and surrounding areas",
                         recommended_action=RECOMMENDED_ACTIONS.get(category, "Dispatch inspection team to the area."),
                         insight=insight_text,
-                        predicted_issue=root_cause_key,
-                        confidence="High" if len(geo_group) >= 3 else "Moderate",
+                        predicted_issue=predicted_issue,
+                        confidence=confidence,
                         reason=reason_msg,
                         severity_escalated=is_high_count or any(c.severity and c.severity.value == "P1" for c in geo_group),
                     )
@@ -137,7 +167,7 @@ class AuditorAgent:
                     print(f"{log_prefix}      Complaints: {cluster.count}")
                     print(f"{log_prefix}      Area: {cluster.affected_area}")
                     print(f"{log_prefix}      Insight: {cluster.insight}")
-                    print(f"{log_prefix}      Predicted Issue: {cluster.predicted_issue} (Confidence: {cluster.confidence})")
+                    print(f"{log_prefix}      Predicted Issue: {cluster.predicted_issue}")
                     print(f"{log_prefix}      Reason: {cluster.reason}")
                     print(f"{log_prefix}      {escalation}")
                     print()

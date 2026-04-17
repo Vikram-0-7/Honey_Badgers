@@ -1,3 +1,4 @@
+// app/login/page.tsx
 import Link from "next/link";
 import LoginForm from "@/components/LoginForm";
 import { ArrowLeft } from "lucide-react";
@@ -7,12 +8,11 @@ export default function LoginPage() {
     <div className="flex min-h-screen w-full bg-white text-black selection:bg-black selection:text-white flex-col lg:flex-row">
       {/* Left Panel - Branding */}
       <div className="relative flex w-full flex-col justify-between bg-black p-8 text-white lg:w-5/12 lg:p-16">
-        {/* Subtle Background Pattern */}
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.08)_1px,transparent_1px)] bg-[size:24px_24px] pointer-events-none"></div>
 
         <div className="relative z-10 flex flex-col items-start">
-          <Link 
-            href="/" 
+          <Link
+            href="/"
             className="mb-12 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-white/50 transition-colors hover:text-white"
           >
             <ArrowLeft className="h-4 w-4" /> Return to Terminal
@@ -21,6 +21,7 @@ export default function LoginPage() {
           <Link href="/" className="mb-4 inline-block text-3xl font-black uppercase tracking-tighter">
             Civix<span className="text-white/50">-</span>Pulse
           </Link>
+
           <div className="inline-block border border-white/20 px-3 py-1 mb-16 text-[10px] font-bold uppercase tracking-widest text-white">
             Secure Gateway
           </div>
@@ -28,7 +29,7 @@ export default function LoginPage() {
 
         <div className="relative z-10">
           <h1 className="mb-6 text-4xl md:text-5xl font-black uppercase leading-[1.1] tracking-tighter text-white">
-            Agentic Governance & <br/>
+            Agentic Governance & <br />
             Grievance Resolution Swarm.
           </h1>
           <p className="max-w-sm text-sm font-medium tracking-widest text-white/60 uppercase leading-relaxed">

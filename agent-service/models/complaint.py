@@ -14,8 +14,47 @@ class Alert(BaseModel):
     """Alert for critical incidents or systemic clusters."""
     type: str = Field(..., description="CRITICAL_ALERT or CLUSTER_ALERT")
     message: str
+    severity: Optional[str] = None
+    area: Optional[str] = None
     complaint_id: Optional[str] = None
     cluster_id: Optional[str] = None
+
+
+class TopRiskArea(BaseModel):
+    area: str
+    reason: str
+
+
+class MostAffectedCategory(BaseModel):
+    category: str
+    count: int
+
+
+class SystemSummary(BaseModel):
+    total_complaints: int
+    critical_issues: int
+    clusters: int
+    top_risk_area: str
+    city_health_score: int
+
+
+class Prediction(BaseModel):
+    category: str
+    prediction: str
+    trend: str
+    confidence: str
+
+
+class Correlation(BaseModel):
+    location: str
+    correlation: str
+    departments: List[str]
+    reason: str
+
+
+class CityHealth(BaseModel):
+    score: int
+    status: str
 
 
 class SeverityLevel(str, Enum):
@@ -130,5 +169,11 @@ class PipelineResult(BaseModel):
     complaints: List[Complaint]
     clusters: List[Cluster]
     alerts: List[Alert] = Field(default_factory=list)
+    predictions: List[Prediction] = Field(default_factory=list)
+    correlations: List[Correlation] = Field(default_factory=list)
+    city_health: Optional[CityHealth] = None
+    top_risk_area: Optional[TopRiskArea] = None
+    most_affected_category: Optional[MostAffectedCategory] = None
+    system_summary: Optional[SystemSummary] = None
     officer_assignments: List[dict]
     execution_log: List[str]

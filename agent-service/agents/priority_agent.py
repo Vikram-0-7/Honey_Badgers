@@ -13,6 +13,7 @@ Location Multipliers: School/Hospital=3.0, Commercial=2.5, Residential=2.0, Park
 
 from datetime import datetime
 from models.complaint import Complaint, SeverityLevel, ComplaintStatus
+from services.llm_service import analyze_with_llm
 
 
 # ── Keyword-based category classification rules ──
@@ -86,34 +87,61 @@ class PriorityAgent:
         text_lower = (complaint.normalized_text or complaint.text).lower()
         location_lower = complaint.location.lower()
 
-        # ── Step 1: Classify category ──
-        complaint.category = self._classify_category(text_lower)
-
-        # ── Step 2: Detect zone type ──
+        # ── Step 1: Detect zone type ──
         complaint.zone_type = self._detect_zone(text_lower, location_lower)
 
-        # ── Step 3: Assign severity & sentiment ──
-        if any(kw in text_lower for kw in HIGH_DISTRESS_KEYWORDS):
-            complaint.sentiment = "high_distress"
-        
-        complaint.severity = self._assign_severity(text_lower)
+        # ── Step 2: LLM Classification ──
+        prompt = f"""
+Analyze the following civic complaint and classify it.
+Return ONLY a valid JSON object matching this schema exactly:
+{{
+  "category": "<Must be one of: Water, Roads, Electricity, Sanitation, Safety, Other>",
+  "severity": "<Must be one of: P1, P2, P3, P4> (P1 is life-threatening/critical, P4 is low)",
+  "reason": "<A brief one-sentence reasoning for the classification>"
+}}
 
-        # ── Step 4: Compute priority score ──
+Complaint: "{text_lower}"
+"""
+        llm_data = analyze_with_llm(prompt)
+        
+        if llm_data and "category" in llm_data and "severity" in llm_data:
+            complaint.category = llm_data["category"]
+            sev_raw = llm_data["severity"]
+            complaint.severity = SeverityLevel(sev_raw) if sev_raw in ["P1", "P2", "P3", "P4"] else SeverityLevel.P3
+            
+            if any(kw in text_lower for kw in HIGH_DISTRESS_KEYWORDS):
+                complaint.sentiment = "high_distress"
+                complaint.severity = SeverityLevel.P1
+                
+            reason_msg = llm_data.get('reason', 'Classified via Groq LLM.').replace('[LLM]', '').strip()
+            if complaint.sentiment == "high_distress":
+                reason_msg += " Elevated severity due to high distress keywords."
+            complaint.reason = reason_msg
+        else:
+            # ── Fallback logic ──
+            complaint.category = self._classify_category(text_lower)
+
+            if any(kw in text_lower for kw in HIGH_DISTRESS_KEYWORDS):
+                complaint.sentiment = "high_distress"
+            
+            complaint.severity = self._assign_severity(text_lower)
+
+            reason_msg = f"Detected category '{complaint.category}' based on text analysis."
+            if complaint.sentiment == "high_distress":
+                reason_msg += " Elevated severity due to high distress keywords."
+            complaint.reason = reason_msg
+
+        # ── Step 3: Compute priority score ──
         complaint.priority_score = self._compute_priority_score(complaint)
 
-        # ── Step 5: Set SLA deadline ──
+        # ── Step 4: Set SLA deadline ──
         complaint.sla_deadline_hours = SLA_HOURS.get(complaint.severity, 72)
 
-        # ── Step 6: Update status ──
+        # ── Step 5: Update status ──
         complaint.status = ComplaintStatus.CLASSIFIED
         complaint.updated_at = datetime.utcnow().isoformat()
 
-        # ── Step 7: Record agent notes ──
-        reason_msg = f"Detected category '{complaint.category}' based on text analysis."
-        if complaint.sentiment == "high_distress":
-            reason_msg += " Elevated severity due to high distress keywords."
-        complaint.reason = reason_msg
-
+        # ── Step 6: Record agent notes ──
         complaint.agent_notes["priority"] = {
             "category": complaint.category,
             "severity": complaint.severity.value,
