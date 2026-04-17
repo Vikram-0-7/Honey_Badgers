@@ -1,24 +1,26 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { supabase } from "@/libs/supabase";
 
-export async function GET(
-  req: NextRequest,
+export async function PATCH(
+  req: Request,
   { params }: { params: { id: string } }
 ) {
-  const { id } = params;
+  const body = await req.json();
 
-  const { data, error } = await supabase
+  const { status, rating } = body;
+
+  const { error } = await supabase
     .from("complaints")
-    .select("*")
-    .eq("id", id)
-    .single();
+    .update({
+      status,
+      rating,
+      verified: status === "resolved",
+    })
+    .eq("id", params.id);
 
-  if (error || !data) {
-    return NextResponse.json(
-      { error: "Complaint not found" },
-      { status: 404 }
-    );
+  if (error) {
+    return NextResponse.json({ error }, { status: 500 });
   }
 
-  return NextResponse.json({ complaint: data });
+  return NextResponse.json({ success: true });
 }
