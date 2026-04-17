@@ -8,5 +8,5 @@ git commit -m "changing"
 <br>
 git pull origin main
 <br>
-git push
+git push origin main
 <br>
