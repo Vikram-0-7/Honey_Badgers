@@ -10,6 +10,14 @@ from datetime import datetime
 from enum import Enum
 
 
+class Alert(BaseModel):
+    """Alert for critical incidents or systemic clusters."""
+    type: str = Field(..., description="CRITICAL_ALERT or CLUSTER_ALERT")
+    message: str
+    complaint_id: Optional[str] = None
+    cluster_id: Optional[str] = None
+
+
 class SeverityLevel(str, Enum):
     """Priority severity levels — P1 is most critical."""
     P1 = "P1"  # Critical: life-threatening or safety hazard
@@ -71,6 +79,10 @@ class Complaint(BaseModel):
 
     # General status
     status: ComplaintStatus = Field(default=ComplaintStatus.PENDING)
+    sentiment: Optional[str] = Field(default=None)
+    assigned_at: Optional[str] = Field(default=None)
+    sla_status: Optional[str] = Field(default=None, description="on_time or breach")
+    reason: Optional[str] = Field(default=None, description="Explanation for agent logic")
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
     updated_at: Optional[str] = Field(default=None)
     agent_notes: dict = Field(default_factory=dict)
@@ -88,6 +100,10 @@ class Cluster(BaseModel):
     count: int
     affected_area: str = Field(description="Description of the affected geographic area")
     recommended_action: str
+    insight: Optional[str] = Field(default=None)
+    predicted_issue: Optional[str] = Field(default=None)
+    confidence: Optional[str] = Field(default=None)
+    reason: Optional[str] = Field(default=None)
     severity_escalated: bool = Field(default=False)
     status: str = Field(default="active")
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
@@ -113,5 +129,6 @@ class PipelineResult(BaseModel):
     total_clusters: int
     complaints: List[Complaint]
     clusters: List[Cluster]
+    alerts: List[Alert] = Field(default_factory=list)
     officer_assignments: List[dict]
     execution_log: List[str]
