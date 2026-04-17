@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-black: #050505;
+  --color-brand-white: #ffffff;
+  --color-brand-gray-light: #f5f5f5;
+  --color-brand-gray-dark: #333333;
+}
+
+:root {
+  --background: #ffffff;
+  --foreground: #050505;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom Selection Color */
+::selection {
+  background-color: #050505;
+  color: #ffffff;
+}
