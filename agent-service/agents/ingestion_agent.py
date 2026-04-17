@@ -47,19 +47,19 @@ class IngestionAgent:
         complaint.ingested_at = datetime.utcnow().isoformat()
 
         # Step 3: Add agent notes
+        reason_msg = f"Normalized text and verified source channel: {complaint.source.value}"
+        complaint.reason = reason_msg
         complaint.agent_notes["ingestion"] = {
             "source_channel": complaint.source.value,
             "text_length": len(normalized),
             "has_location": bool(complaint.location),
             "processed_at": complaint.ingested_at,
+            "reason": reason_msg
         }
 
         # Step 4: Log
-        print(f"{log_prefix} Complaint received - ID: {complaint.id[:8]}...")
-        print(f"{log_prefix}   Source: {complaint.source.value}")
-        print(f"{log_prefix}   Location: {complaint.location}")
-        print(f"{log_prefix}   Text: \"{normalized[:80]}{'...' if len(normalized) > 80 else ''}\"")
-        print(f"{log_prefix}   [OK] Normalized and ingested successfully")
+        print(f"{log_prefix} Complaint received | ID={complaint.id[:8]} | Source={complaint.source.value}")
+        print(f"{log_prefix} Reason={reason_msg}")
         print()
 
         return complaint

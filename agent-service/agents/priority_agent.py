@@ -28,6 +28,9 @@ CATEGORY_KEYWORDS = {
 P1_CRITICAL_KEYWORDS = ["live wire", "fire", "sparking", "collapse", "flood", "accident", "children", "school", "hospital", "risk"]
 P2_HIGH_KEYWORDS = ["burst", "overflow", "no supply", "dark", "unsafe", "women"]
 
+# ── Sentiment and high distress keywords ──
+HIGH_DISTRESS_KEYWORDS = ["urgent", "danger", "help", "fire", "shock"]
+
 # ── Location type detection for zone multiplier ──
 ZONE_KEYWORDS = {
     "school": ["school", "college", "university", "jntu", "campus"],
@@ -89,7 +92,10 @@ class PriorityAgent:
         # ── Step 2: Detect zone type ──
         complaint.zone_type = self._detect_zone(text_lower, location_lower)
 
-        # ── Step 3: Assign severity ──
+        # ── Step 3: Assign severity & sentiment ──
+        if any(kw in text_lower for kw in HIGH_DISTRESS_KEYWORDS):
+            complaint.sentiment = "high_distress"
+        
         complaint.severity = self._assign_severity(text_lower)
 
         # ── Step 4: Compute priority score ──
@@ -103,6 +109,11 @@ class PriorityAgent:
         complaint.updated_at = datetime.utcnow().isoformat()
 
         # ── Step 7: Record agent notes ──
+        reason_msg = f"Detected category '{complaint.category}' based on text analysis."
+        if complaint.sentiment == "high_distress":
+            reason_msg += " Elevated severity due to high distress keywords."
+        complaint.reason = reason_msg
+
         complaint.agent_notes["priority"] = {
             "category": complaint.category,
             "severity": complaint.severity.value,
@@ -110,16 +121,12 @@ class PriorityAgent:
             "priority_score": round(complaint.priority_score, 2),
             "sla_hours": complaint.sla_deadline_hours,
             "classified_at": complaint.updated_at,
+            "sentiment": complaint.sentiment,
+            "reason": reason_msg
         }
 
         # ── Logging ──
-        severity_tag = {"P1": "[!!!]", "P2": "[!!]", "P3": "[!]", "P4": "[-]"}.get(complaint.severity.value, "[?]")
-        print(f"{log_prefix} Complaint {complaint.id[:8]}... classified")
-        print(f"{log_prefix}   Category:  {complaint.category}")
-        print(f"{log_prefix}   Severity:  {severity_tag} {complaint.severity.value}")
-        print(f"{log_prefix}   Zone:      {complaint.zone_type}")
-        print(f"{log_prefix}   Score:     {complaint.priority_score:.2f}")
-        print(f"{log_prefix}   SLA:       {complaint.sla_deadline_hours}h")
+        print(f"{log_prefix} Category={complaint.category} | Severity={complaint.severity.value} | Reason={reason_msg}")
         print()
 
         return complaint
@@ -148,6 +155,9 @@ class PriorityAgent:
 
     def _assign_severity(self, text: str) -> SeverityLevel:
         """Assign severity level based on critical keyword matching."""
+        # Note: High distress keywords are handled here or by sentiment logic.
+        if any(kw in text for kw in HIGH_DISTRESS_KEYWORDS):
+            return SeverityLevel.P1
         if any(kw in text for kw in P1_CRITICAL_KEYWORDS):
             return SeverityLevel.P1
         if any(kw in text for kw in P2_HIGH_KEYWORDS):

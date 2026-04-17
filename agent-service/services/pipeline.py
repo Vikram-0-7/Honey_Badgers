@@ -15,7 +15,7 @@ from agents.ingestion_agent import IngestionAgent
 from agents.priority_agent import PriorityAgent
 from agents.auditor_agent import AuditorAgent
 from agents.resolver_agent import ResolverAgent
-from models.complaint import Complaint, Cluster, PipelineResult
+from models.complaint import Complaint, Cluster, PipelineResult, Alert, SeverityLevel
 from services.mock_data import generate_mock_complaints
 
 
@@ -37,6 +37,7 @@ def run_pipeline(complaints: list[Complaint] | None = None) -> PipelineResult:
         PipelineResult with all processed complaints, clusters, and assignments.
     """
     execution_log: list[str] = []
+    alerts: list[Alert] = []
     start_time = time.time()
 
     # ── Banner ──
@@ -73,14 +74,22 @@ def run_pipeline(complaints: list[Complaint] | None = None) -> PipelineResult:
 
         # Agent 1: Ingestion
         complaint = ingestion_agent.process(complaint)
-        execution_log.append(f"Ingestion: {complaint.id[:8]} — {complaint.source.value}")
+        execution_log.append(f"Ingestion: {complaint.id[:8]} - {complaint.source.value}")
 
         # Agent 2: Priority
         complaint = priority_agent.process(complaint)
         execution_log.append(
-            f"Priority: {complaint.id[:8]} — {complaint.category} / "
+            f"Priority: {complaint.id[:8]} - {complaint.category} / "
             f"{complaint.severity.value} / Score: {complaint.priority_score:.1f}"
         )
+
+        # Generate Alerts
+        if complaint.severity == SeverityLevel.P1:
+            alerts.append(Alert(
+                type="CRITICAL_ALERT",
+                message="Immediate attention required: Critical P1 incident detected.",
+                complaint_id=complaint.id
+            ))
 
     # ══════════════════════════════════════════════════════════
     # PHASE 2: Cluster Analysis (batch)
@@ -93,6 +102,14 @@ def run_pipeline(complaints: list[Complaint] | None = None) -> PipelineResult:
 
     clusters: list[Cluster] = auditor_agent.process(complaints)
     execution_log.append(f"Auditor: {len(clusters)} cluster(s) detected")
+
+    for cluster in clusters:
+        if cluster.count >= 3:
+            alerts.append(Alert(
+                type="CLUSTER_ALERT",
+                message="Immediate attention required: Systemic infrastructure issue.",
+                cluster_id=cluster.cluster_id
+            ))
 
     # ══════════════════════════════════════════════════════════
     # PHASE 3: Officer Assignment (batch)
@@ -150,6 +167,7 @@ def run_pipeline(complaints: list[Complaint] | None = None) -> PipelineResult:
         total_clusters=len(clusters),
         complaints=complaints,
         clusters=clusters,
+        alerts=alerts,
         officer_assignments=assignments,
         execution_log=execution_log,
     )

@@ -73,6 +73,7 @@ class AuditorAgent:
         3. If group size >= CLUSTER_THRESHOLD, create a Cluster
         4. Tag constituent complaints with cluster_id
         5. Infer root cause for each cluster
+        6. Generate insights
 
         Args:
             complaints: List of all classified complaints.
@@ -108,6 +109,9 @@ class AuditorAgent:
                     templates = ROOT_CAUSE_TEMPLATES.get(category, ROOT_CAUSE_TEMPLATES.get("Safety"))
                     root_cause = templates.get(root_cause_key, templates["default"])
 
+                    insight_text = f"Multiple {category.lower()} complaints detected in same geographic region."
+                    reason_msg = f"Geographic proximity grouping matched {len(geo_group)} similar items."
+                    
                     cluster = Cluster(
                         category=category,
                         root_cause=root_cause,
@@ -115,6 +119,10 @@ class AuditorAgent:
                         count=len(geo_group),
                         affected_area=f"{geo_group[0].location} and surrounding areas",
                         recommended_action=RECOMMENDED_ACTIONS.get(category, "Dispatch inspection team to the area."),
+                        insight=insight_text,
+                        predicted_issue=root_cause_key,
+                        confidence="High" if len(geo_group) >= 3 else "Moderate",
+                        reason=reason_msg,
                         severity_escalated=is_high_count or any(c.severity and c.severity.value == "P1" for c in geo_group),
                     )
 
@@ -128,8 +136,9 @@ class AuditorAgent:
                     print(f"{log_prefix}   >> CLUSTER DETECTED! ID: {cluster.cluster_id[:8]}...")
                     print(f"{log_prefix}      Complaints: {cluster.count}")
                     print(f"{log_prefix}      Area: {cluster.affected_area}")
-                    print(f"{log_prefix}      Root Cause: {root_cause[:80]}...")
-                    print(f"{log_prefix}      Action: {cluster.recommended_action[:60]}...")
+                    print(f"{log_prefix}      Insight: {cluster.insight}")
+                    print(f"{log_prefix}      Predicted Issue: {cluster.predicted_issue} (Confidence: {cluster.confidence})")
+                    print(f"{log_prefix}      Reason: {cluster.reason}")
                     print(f"{log_prefix}      {escalation}")
                     print()
                 else:

@@ -72,9 +72,17 @@ class ResolverAgent:
         severity_val = complaint.severity.value if complaint.severity else "P4"
         complaint.sla_deadline_hours = SLA_HOURS.get(severity_val, 72)
 
-        # Step 4: Update status
+        # Step 4: Update status and SLA tracking
         complaint.status = ComplaintStatus.ASSIGNED
-        complaint.updated_at = datetime.utcnow().isoformat()
+        complaint.assigned_at = datetime.utcnow().isoformat()
+        complaint.updated_at = complaint.assigned_at
+        complaint.sla_status = "on_time"
+        
+        reason_msg = f"Assigned to {officer_info['name']} based on department ({category}) availability."
+        if complaint.reason:
+            complaint.reason += " -> " + reason_msg
+        else:
+            complaint.reason = reason_msg
 
         # Step 5: Record agent notes
         complaint.agent_notes["resolver"] = {
@@ -101,11 +109,7 @@ class ResolverAgent:
 
         # Logging
         urgency = "[URGENT]" if severity_val == "P1" else "[STANDARD]"
-        print(f"{log_prefix} {urgency} Assignment -- Complaint {complaint.id[:8]}...")
-        print(f"{log_prefix}   Category:  {category}")
-        print(f"{log_prefix}   Officer:   {officer_info['name']} ({officer_info['id'][:12]}...)")
-        print(f"{log_prefix}   SLA:       {complaint.sla_deadline_hours} hours")
-        print(f"{log_prefix}   Status:    [OK] ASSIGNED")
+        print(f"{log_prefix} Assigned to {officer_info['name']} | SLA Deadline={complaint.sla_deadline_hours}h | Urgency={urgency}")
         print()
 
         return assignment
