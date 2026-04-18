@@ -1,7 +1,11 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
+import { createClient } from "@/libs/supabase/server";
 
-export default function Hero() {
+export default async function Hero() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
   return (
     <section className="relative overflow-hidden w-full border-b border-black/10 bg-white pb-32">
       <div className="mx-auto max-w-7xl px-6 md:px-12 grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
@@ -20,7 +24,7 @@ export default function Hero() {
           </p>
           <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto mt-4">
             <Link
-              href="/login"
+              href={user ? "/dashboard" : "/login"}
               className="flex items-center justify-center gap-3 bg-black px-8 py-4 text-sm font-bold uppercase tracking-widest text-white transition-all hover:bg-black/80"
             >
               Get Started <ArrowRight className="h-4 w-4" />
