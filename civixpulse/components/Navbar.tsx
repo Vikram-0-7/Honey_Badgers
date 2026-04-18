@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Search, MapPin, User, LogIn } from "lucide-react";
 import { createClient } from "@/libs/supabase/server";
+import LogoutButton from "./LogoutButton";
 
 export default async function Navbar() {
   const supabase = await createClient();
@@ -49,13 +50,16 @@ export default async function Navbar() {
               <span className="hidden sm:inline-block">Officer / Citizen</span>
             </Link>
           ) : (
-            <Link
-              href="/dashboard"
-              className="group flex items-center gap-2 text-sm font-bold uppercase tracking-wider transition-opacity hover:opacity-70"
-            >
-              <LogIn className="h-5 w-5" />
-              <span className="hidden sm:inline-block">{user.email}</span>
-            </Link>
+            <div className="flex items-center gap-4">
+              <Link
+                href="/dashboard"
+                className="group flex items-center gap-2 text-sm font-bold uppercase tracking-wider transition-opacity hover:opacity-70"
+              >
+                <User className="h-5 w-5" />
+                <span className="hidden sm:inline-block">{user.email}</span>
+              </Link>
+              <LogoutButton />
+            </div>
           )}
         </div>
       </div>

@@ -39,6 +39,25 @@ export default function LoginForm() {
     router.push("/");
   };
 
+  const handleResetPassword = async () => {
+    if (!email) {
+      alert("Please enter your System ID (Email) first to recover your credentials.");
+      return;
+    }
+    
+    setLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/update-password`,
+    });
+    setLoading(false);
+
+    if (error) {
+      alert(error.message);
+    } else {
+      alert("Password recovery link sent! Check your email inbox.");
+    }
+  };
+
   return (
     <div className="w-full max-w-md">
       <h2 className="mb-2 text-3xl font-black uppercase tracking-tighter text-black">
@@ -111,12 +130,13 @@ export default function LoginForm() {
       </form>
 
       <div className="mt-8 text-center">
-        <a
-          href="#"
+        <button
+          type="button"
+          onClick={handleResetPassword}
           className="text-xs font-bold uppercase tracking-widest text-black/50 hover:text-black transition-colors"
         >
           Recover Credentials
-        </a>
+        </button>
       </div>
     </div>
   );
