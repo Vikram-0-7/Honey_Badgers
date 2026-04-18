@@ -2,12 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import dynamic from "next/dynamic";
 
 import PageHeader from "@/components/ui/PageHeader";
-import Timeline from "@/components/ui/Timeline";
 import StatusBadge from "@/components/ui/StatusBadge";
 import Card from "@/components/ui/Card";
-import MapPlaceholder from "@/components/ui/MapPlaceholder";
+import Timeline from "@/components/ui/Timeline";
+
+const ComplaintMap = dynamic(() => import("@/components/ComplaintMap"), {
+  ssr: false,
+});
 
 export default function Track() {
   const { id } = useParams();
@@ -31,22 +35,22 @@ export default function Track() {
     );
   }
 
-  // 🔥 Dynamic timeline (basic version)
+  // 🔥 Timeline (important for your system vision)
   const timelineEvents = [
     {
       title: "Report Submitted",
       date: new Date(complaint.created_at).toLocaleString(),
-      description: "Citizen submitted report via portal.",
+      description: "Citizen submitted complaint via portal",
     },
     {
-      title: "AI Processing",
+      title: "System Logged",
       date: new Date(complaint.created_at).toLocaleString(),
-      description: `Categorized as ${complaint.category}`,
+      description: `Source: ${complaint.source}`,
     },
     {
-      title: "Status Update",
+      title: "Current Status",
       date: new Date().toLocaleString(),
-      description: `Current status: ${complaint.status}`,
+      description: complaint.status,
     },
   ];
 
@@ -57,16 +61,15 @@ export default function Track() {
       <div className="mb-8 flex justify-between items-start">
         <PageHeader
           title={`Track ${complaint.id}`}
-          subtitle={complaint.raw_text?.slice(0, 50)}
+          subtitle={complaint.text}
         />
-
         <StatusBadge status={complaint.status} />
       </div>
 
       {/* GRID */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
 
-        {/* TIMELINE */}
+        {/* LEFT → TIMELINE */}
         <div>
           <h3 className="text-sm font-black uppercase mb-6">
             Resolution Timeline
@@ -75,31 +78,60 @@ export default function Track() {
           <Timeline events={timelineEvents} />
         </div>
 
-        {/* RIGHT SIDE */}
+        {/* RIGHT → DETAILS */}
         <div className="space-y-6">
 
-          {/* CLUSTER INFO (placeholder for now) */}
+          {/* DETAILS CARD */}
           <Card>
-            <h4 className="text-xs font-bold uppercase tracking-widest mb-4 border-b border-black/10 pb-2">
-              Cluster Info
+            <h4 className="text-xs font-bold uppercase tracking-widest mb-4 border-b pb-2">
+              Complaint Info
             </h4>
 
             <p className="text-sm mb-2">
-              <span className="opacity-50">Related Reports:</span> Coming soon
+              <span className="opacity-50">Category:</span> {complaint.category || "General"}
+            </p>
+
+            <p className="text-sm mb-2">
+              <span className="opacity-50">Severity:</span> {complaint.severity || "Medium"}
+            </p>
+
+            <p className="text-sm mb-2">
+              <span className="opacity-50">Priority Score:</span> {complaint.priority_score ?? "N/A"}
             </p>
 
             <p className="text-sm">
-              <span className="opacity-50">Priority:</span> {complaint.priority}
+              <span className="opacity-50">Source:</span> {complaint.source}
             </p>
           </Card>
 
-          {/* MAP (upgrade later to real map) */}
-          <MapPlaceholder height="h-64" />
+          {/* OFFICER / SLA */}
+          <Card>
+            <h4 className="text-xs font-bold uppercase tracking-widest mb-4 border-b pb-2">
+              Assignment
+            </h4>
 
-          {/* OPTIONAL: SHOW COORDINATES */}
+            <p className="text-sm mb-2">
+              <span className="opacity-50">Officer:</span>{" "}
+              {complaint.officer_name || "Not assigned"}
+            </p>
+
+            <p className="text-sm">
+              <span className="opacity-50">SLA Status:</span>{" "}
+              {complaint.sla_status || "Pending"}
+            </p>
+          </Card>
+
+          {/* MAP */}
+          <ComplaintMap
+            lat={complaint.latitude}
+            lng={complaint.longitude}
+          />
+
+          {/* COORDS */}
           {complaint.latitude && (
             <p className="text-xs font-bold">
-              {complaint.latitude}, {complaint.longitude}
+              {complaint.latitude.toFixed(4)},{" "}
+              {complaint.longitude?.toFixed(4)}
             </p>
           )}
         </div>

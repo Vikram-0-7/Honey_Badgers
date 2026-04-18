@@ -10,12 +10,25 @@ export default function Dashboard() {
   const [complaints, setComplaints] = useState<any[]>([]);
 
   useEffect(() => {
-    fetch("/api/complaints/user")
-      .then((res) => res.json())
-      .then((data) => setComplaints(data.complaints || []));
+    async function load() {
+      try {
+        const res = await fetch("/api/complaints/user");
+        const data = await res.json();
+
+        if (res.ok) {
+          setComplaints(data.complaints || []);
+        } else {
+          console.error("API error:", data);
+        }
+      } catch (err) {
+        console.error("Fetch failed:", err);
+      }
+    }
+
+    load();
   }, []);
 
-  // 🔥 Dynamic stats
+  // 🔥 SAME UI LOGIC
   const total = complaints.length;
   const pending = complaints.filter(c => c.status === "pending").length;
   const resolved = complaints.filter(c => c.status === "resolved").length;
@@ -24,7 +37,7 @@ export default function Dashboard() {
     <div className="mx-auto max-w-7xl px-6 py-12">
       <PageHeader title="Welcome back, Citizen" subtitle="Your Civic Dashboard" />
 
-      {/* STATS */}
+      {/* STATS (UNCHANGED) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
         <StatCard title="Total Reports" value={total} />
         <StatCard title="Pending" value={pending} />
@@ -33,7 +46,7 @@ export default function Dashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
 
-        {/* COMPLAINT LIST */}
+        {/* COMPLAINT LIST (UNCHANGED UI) */}
         <div className="lg:col-span-2">
           <div className="flex justify-between items-end mb-6 border-b border-black/10 pb-4">
             <h3 className="text-xl font-black uppercase">Recent Complaints</h3>
@@ -61,7 +74,7 @@ export default function Dashboard() {
                     </span>
 
                     <span className="text-sm font-bold uppercase">
-                      {c.raw_text?.slice(0, 40)}
+                      {c.text?.slice(0, 40)} {/* ✅ FIX ONLY */}
                     </span>
                   </div>
 
@@ -72,7 +85,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* NOTIFICATIONS */}
+        {/* NOTIFICATIONS (UNCHANGED UI) */}
         <div>
           <h3 className="text-xl font-black uppercase mb-6 border-b border-black/10 pb-4">
             Notification Feed
@@ -89,7 +102,7 @@ export default function Dashboard() {
                   Complaint {c.id} is {c.status}.
                 </p>
 
-                {c.status === "completed" && (
+                {c.status === "resolved" && (  // ✅ FIX
                   <Link
                     href={`/portal/verify/${c.id}`}
                     className="text-[10px] uppercase font-bold underline mt-2 inline-block"

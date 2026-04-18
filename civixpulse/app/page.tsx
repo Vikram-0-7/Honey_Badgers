@@ -4,7 +4,6 @@ import Services from "@/components/Services";
 import Process from "@/components/Process";
 import FeatureHighlight from "@/components/FeatureHighlight";
 import Footer from "@/components/Footer";
-import Complaints from "./complaints/page";
 
 
 export default function Home() {
@@ -16,7 +15,7 @@ export default function Home() {
         <Services />
         <Process />
         <FeatureHighlight />
-        <Complaints />
+
       </main>
       <Footer />
     </>

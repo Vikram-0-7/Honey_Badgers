@@ -10,6 +10,9 @@ const MapPicker = dynamic(() => import("@/components/MapPicker"), {
   ssr: false,
 });
 
+// const MapPicker = dynamic(() => import("@/components/MapPicker"), { ssr: false });
+
+
 export default function SubmitComplaint() {
   const router = useRouter();
 
@@ -40,8 +43,8 @@ export default function SubmitComplaint() {
 
     const formData = new FormData();
     formData.append("mode", mode);
-    formData.append("lat", String(lat));
-    formData.append("lng", String(lng));
+    formData.append("latitude", String(lat));
+    formData.append("longitude", String(lng));
 
     if (mode === "form") {
       formData.append("description", description);
@@ -49,18 +52,46 @@ export default function SubmitComplaint() {
       formData.append("file", file!);
     }
 
-    const res = await fetch("/api/complaints", {
-      method: "POST",
-      body: formData,
-    });
+    try {
+      // 🔥 STEP 1: Save complaint
+      const res = await fetch("/api/complaints", {
+        method: "POST",
+        body: formData,
+      });
 
-    const data = await res.json();
-    setLoading(false);
+      const data = await res.json();
 
-    if (data.success) {
+      if (!data.success) {
+        alert("Error submitting complaint");
+        setLoading(false);
+        return;
+      }
+
+      // 🔥 STEP 2: Launch agent (non-blocking)
+      console.log("Launching agent for complaint:", data.complaint.id);
+      fetch("/api/launch-agent", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text: description || "File complaint",
+          location: `${lat},${lng}`,
+          source: mode,
+          complaint_id: data.complaint.id, // 🔥 IMPORTANT
+        }),
+      }).catch(() => {
+        console.log("Agent failed (non-critical)");
+      });
+
+      // 🔥 STEP 3: Redirect
       router.push(`/portal/track/${data.complaint.id}`);
-    } else {
-      alert("Error");
+
+    } catch (err) {
+      console.error(err);
+      alert("Network error");
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -82,7 +113,7 @@ export default function SubmitComplaint() {
         ))}
       </div>
 
-      {/* FORM MODE */}
+      {/* FORM */}
       {mode === "form" && (
         <Card className="mb-8">
           <textarea
@@ -94,7 +125,7 @@ export default function SubmitComplaint() {
         </Card>
       )}
 
-      {/* FILE MODE */}
+      {/* FILE */}
       {(mode === "image" || mode === "audio") && (
         <Card className="mb-8">
           <input
@@ -105,7 +136,7 @@ export default function SubmitComplaint() {
         </Card>
       )}
 
-      {/* LOCATION */}
+      {/* MAP */}
       <Card className="mb-8">
         <MapPicker
           onSelect={(coords: any) => {

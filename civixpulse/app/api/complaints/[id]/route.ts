@@ -1,26 +1,61 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/libs/supabase";
+import { createClient } from "@/libs/supabase/server";
 
+// ✅ GET complaint
+export async function GET(
+  req: Request,
+  context: { params: Promise<{ id: string }> } // ✅ FIX
+) {
+  try {
+    const supabase = await createClient();
+
+    const { id } = await context.params; // ✅ FIX (await here)
+
+    const { data, error } = await supabase
+      .from("complaints")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (error) throw error;
+
+    return NextResponse.json({ complaint: data });
+
+  } catch (err) {
+    console.error(err);
+    return NextResponse.json(
+      { error: "Failed to fetch complaint" },
+      { status: 500 }
+    );
+  }
+}
+
+// ✅ PATCH
 export async function PATCH(
   req: Request,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> } // ✅ FIX
 ) {
-  const body = await req.json();
+  try {
+    const supabase = await createClient();
 
-  const { status, rating } = body;
+    const { id } = await context.params; // ✅ FIX
 
-  const { error } = await supabase
-    .from("complaints")
-    .update({
-      status,
-      rating,
-      verified: status === "resolved",
-    })
-    .eq("id", params.id);
+    const { status } = await req.json();
 
-  if (error) {
-    return NextResponse.json({ error }, { status: 500 });
+    const { error } = await supabase
+      .from("complaints")
+      .update({ status })
+      .eq("id", id);
+
+    if (error) throw error;
+
+    return NextResponse.json({ success: true });
+
+  } catch (err) {
+    console.error(err);
+    return NextResponse.json(
+      { error: "Failed to update complaint" },
+      { status: 500 }
+    );
   }
-
-  return NextResponse.json({ success: true });
 }
