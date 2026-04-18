@@ -2,12 +2,8 @@ import PageHeader from "@/components/ui/PageHeader";
 import Timeline from "@/components/ui/Timeline";
 import StatusBadge from "@/components/ui/StatusBadge";
 import Card from "@/components/ui/Card";
-import dynamic from "next/dynamic";
+import DynamicComplaintMap from "@/components/DynamicComplaintMap";
 import { createClient } from "@/libs/supabase/server";
-
-const ComplaintMap = dynamic(() => import("@/components/ComplaintMap"), {
-  ssr: false,
-});
 
 async function getTrackingData(complaintId: string) {
   const supabase = await createClient();
@@ -157,7 +153,7 @@ export default async function Track({
 
           {/* MAP */}
           {(complaint?.latitude && complaint?.longitude) && (
-            <ComplaintMap
+            <DynamicComplaintMap
               lat={complaint.latitude}
               lng={complaint.longitude}
             />
