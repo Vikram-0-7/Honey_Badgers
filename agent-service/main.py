@@ -101,7 +101,7 @@ async def execute_pipeline():
         result = run_pipeline()
         # Store result for later retrieval
         pipeline_runs[result.pipeline_run_id] = result
-        return result
+        return result.model_dump()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Pipeline execution failed: {str(e)}")
 
@@ -139,7 +139,7 @@ async def analyze_complaint(submission: ComplaintSubmission):
 
         result = run_pipeline(complaints)
         pipeline_runs[result.pipeline_run_id] = result
-        return result
+        return result.model_dump()
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
