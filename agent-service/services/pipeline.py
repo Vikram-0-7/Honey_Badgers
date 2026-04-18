@@ -15,9 +15,10 @@ from agents.ingestion_agent import IngestionAgent
 from agents.priority_agent import PriorityAgent
 from agents.auditor_agent import AuditorAgent
 from agents.resolver_agent import ResolverAgent
-from models.complaint import Complaint, Cluster, PipelineResult, Alert, SeverityLevel, Prediction, Correlation, CityHealth, TopRiskArea, MostAffectedCategory, SystemSummary
+from models.complaint import Complaint, Cluster, PipelineResult, Alert, SeverityLevel, Prediction, PredictiveAlert, Correlation, CityHealth, TopRiskArea, MostAffectedCategory, SystemSummary
 from services.mock_data import generate_mock_complaints
 from collections import defaultdict
+
 
 
 def generate_predictions(complaints: list[Complaint]) -> list[Prediction]:
@@ -38,21 +39,248 @@ def generate_predictions(complaints: list[Complaint]) -> list[Prediction]:
     return predictions
 
 
-def generate_correlations(complaints: list[Complaint]) -> list[Correlation]:
+# ── Severity weights for velocity computation ──
+SEVERITY_VELOCITY_WEIGHTS = {
+    SeverityLevel.P1: 3.0,
+    SeverityLevel.P2: 2.0,
+    SeverityLevel.P3: 1.0,
+    SeverityLevel.P4: 0.5,
+}
+
+
+def generate_predictive_alerts(complaints: list[Complaint], clusters: list[Cluster]) -> list[PredictiveAlert]:
+    """
+    Predict infrastructure failures 24-48 hours ahead using cluster velocity.
+    
+    Velocity = weighted_complaint_count / time_span_hours
+    Thresholds:
+      - velocity >= 2.0/hr → 24hr critical alert
+      - velocity >= 1.0/hr → 48hr warning alert
+      - velocity >= 0.5/hr with P1 present → 24hr elevated alert
+    """
+    alerts: list[PredictiveAlert] = []
+    
+    # Group complaints by category
+    category_groups: dict[str, list[Complaint]] = defaultdict(list)
+    for c in complaints:
+        if c.category:
+            category_groups[c.category].append(c)
+    
+    # Map clusters to categories for area info
+    cluster_areas: dict[str, str] = {}
+    for cl in clusters:
+        cluster_areas[cl.category] = cl.affected_area
+    
+    for category, group in category_groups.items():
+        if len(group) < 2:
+            continue
+        
+        # Calculate time span from earliest to latest complaint
+        timestamps = []
+        for c in group:
+            try:
+                timestamps.append(datetime.fromisoformat(c.created_at))
+            except (ValueError, TypeError):
+                timestamps.append(datetime.utcnow())
+        
+        if len(timestamps) < 2:
+            continue
+            
+        time_span_hours = max(
+            (max(timestamps) - min(timestamps)).total_seconds() / 3600,
+            0.5  # Minimum 30 min span to avoid division artifacts
+        )
+        
+        # Compute weighted count (P1 counts 3x, P2 counts 2x, etc.)
+        weighted_count = sum(
+            SEVERITY_VELOCITY_WEIGHTS.get(c.severity, 1.0)
+            for c in group
+        )
+        
+        velocity = weighted_count / time_span_hours
+        
+        # Check for P1 presence in this category
+        has_p1 = any(c.severity == SeverityLevel.P1 for c in group)
+        
+        # Determine alert level
+        time_horizon = 0
+        confidence = "low"
+        
+        if velocity >= 2.0:
+            time_horizon = 24
+            confidence = "high"
+        elif velocity >= 1.0:
+            time_horizon = 48
+            confidence = "medium"
+        elif velocity >= 0.5 and has_p1:
+            time_horizon = 24
+            confidence = "medium"
+        
+        if time_horizon > 0:
+            trigger_parts = []
+            trigger_parts.append(f"{len(group)} complaints at velocity {velocity:.1f}/hr")
+            if has_p1:
+                trigger_parts.append("P1 severity detected")
+            if category in cluster_areas:
+                trigger_parts.append(f"active cluster in {cluster_areas[category]}")
+            
+            alerts.append(PredictiveAlert(
+                category=category,
+                predicted_failure=f"{category} infrastructure failure predicted within {time_horizon} hours",
+                time_horizon_hours=time_horizon,
+                confidence=confidence,
+                velocity_score=round(velocity, 2),
+                trigger_reason="; ".join(trigger_parts),
+                affected_area=cluster_areas.get(category),
+                severity_weight=round(weighted_count, 1),
+            ))
+    
+    # Sort by velocity (most urgent first)
+    alerts.sort(key=lambda a: a.velocity_score, reverse=True)
+    return alerts
+
+
+# ── Cross-department correlation patterns ──
+CROSS_DEPT_PATTERNS = {
+    frozenset({"Water", "Electricity"}): {
+        "correlation_type": "construction_damage",
+        "likely_root_cause": "Construction or excavation work has likely damaged both water pipes and electrical conduits running underground.",
+        "recommended_joint_action": "Deploy joint Water + Electricity inspection team. Check for active construction sites within 500m radius.",
+    },
+    frozenset({"Water", "Roads"}): {
+        "correlation_type": "shared_infrastructure",
+        "likely_root_cause": "Underground water pipeline damage has likely caused road surface collapse or subsidence.",
+        "recommended_joint_action": "Inspect subsurface water mains before road resurfacing. Coordinate pipeline repair with road crew.",
+    },
+    frozenset({"Electricity", "Safety"}): {
+        "correlation_type": "cascading_failure",
+        "likely_root_cause": "Electrical infrastructure failure (downed wires, transformer damage) creating public safety hazard.",
+        "recommended_joint_action": "Cordon off affected area immediately. Deploy electrical emergency team with safety escort.",
+    },
+    frozenset({"Sanitation", "Water"}): {
+        "correlation_type": "shared_infrastructure",
+        "likely_root_cause": "Blocked drainage system causing sewage backflow and contaminating water supply lines.",
+        "recommended_joint_action": "Priority drain clearance + water quality testing in affected zone.",
+    },
+    frozenset({"Roads", "Safety"}): {
+        "correlation_type": "cascading_failure",
+        "likely_root_cause": "Deteriorated road conditions (potholes, missing signage) creating accident-prone zones.",
+        "recommended_joint_action": "Emergency pothole filling + temporary safety barriers. Schedule road safety audit.",
+    },
+    frozenset({"Sanitation", "Safety"}): {
+        "correlation_type": "cascading_failure",
+        "likely_root_cause": "Waste accumulation and drain overflow creating health and safety hazards for residents.",
+        "recommended_joint_action": "Emergency waste clearance + health inspection of affected area.",
+    },
+}
+
+
+def detect_cross_dept_correlations(complaints: list[Complaint]) -> list[Correlation]:
+    """
+    Detect cross-department correlations by grouping complaints
+    by geographic proximity and finding locations with multiple
+    department categories. Uses predefined patterns for known
+    cross-department failure modes.
+    """
+    from math import radians, cos, sin, asin, sqrt
+    
     correlations = []
-    location_categories = defaultdict(set)
+    
+    # Group complaints by proximity (within ~2km)
+    # Build location buckets using normalized location names
+    location_groups: dict[str, list[Complaint]] = defaultdict(list)
     for c in complaints:
         if c.location and c.category:
-            location_categories[c.location.lower()].add(c.category)
-            
-    for loc, cats in location_categories.items():
-        if len(cats) >= 2:
-            correlations.append(Correlation(
-                location=loc.title(),
-                correlation=f"{list(cats)[0]} issues affecting {list(cats)[1]} infrastructure",
-                departments=list(cats),
-                reason="Multiple categories detected in same region"
-            ))
+            loc_key = c.location.strip().lower()
+            location_groups[loc_key].append(c)
+    
+    # Also merge nearby GPS coordinates into groups
+    processed_locs = list(location_groups.keys())
+    merged: dict[str, set[str]] = {loc: {loc} for loc in processed_locs}
+    
+    for i, loc1 in enumerate(processed_locs):
+        group1 = location_groups[loc1]
+        if not group1:
+            continue
+        c1 = group1[0]
+        for j, loc2 in enumerate(processed_locs):
+            if j <= i:
+                continue
+            group2 = location_groups[loc2]
+            if not group2:
+                continue
+            c2 = group2[0]
+            # Haversine distance check (~2km)
+            lat1, lon1, lat2, lon2 = map(radians, [c1.latitude, c1.longitude, c2.latitude, c2.longitude])
+            dlat = lat2 - lat1
+            dlon = lon2 - lon1
+            a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+            dist = 2 * asin(sqrt(a)) * 6371  # km
+            if dist <= 2.0:
+                # Merge loc2 into loc1's group
+                for key in merged.get(loc2, {loc2}):
+                    merged.setdefault(loc1, {loc1}).add(key)
+                merged[loc2] = merged[loc1]  # point to same set
+    
+    # Deduplicate merged groups
+    seen_groups: list[set[str]] = []
+    seen_locs: set[str] = set()
+    for loc, group_set in merged.items():
+        frozen = frozenset(group_set)
+        if frozen not in seen_locs:
+            seen_groups.append(group_set)
+            seen_locs.add(frozen)
+    
+    # Analyze each location group for cross-department patterns
+    for loc_set in seen_groups:
+        # Collect all complaints in this location group
+        all_complaints: list[Complaint] = []
+        for loc_key in loc_set:
+            all_complaints.extend(location_groups.get(loc_key, []))
+        
+        if not all_complaints:
+            continue
+        
+        # Get unique categories
+        categories = set(c.category for c in all_complaints if c.category)
+        
+        if len(categories) < 2:
+            continue
+        
+        # Check all pairs of categories for known patterns
+        cat_list = sorted(categories)
+        location_display = all_complaints[0].location.title()
+        
+        for ci in range(len(cat_list)):
+            for cj in range(ci + 1, len(cat_list)):
+                pair = frozenset({cat_list[ci], cat_list[cj]})
+                pattern = CROSS_DEPT_PATTERNS.get(pair)
+                
+                if pattern:
+                    # Known cross-dept pattern found
+                    correlations.append(Correlation(
+                        location=location_display,
+                        correlation=f"{cat_list[ci]} issues linked to {cat_list[cj]} complaints",
+                        departments=[cat_list[ci], cat_list[cj]],
+                        reason=f"{len(all_complaints)} complaints across {len(categories)} departments in same area",
+                        correlation_type=pattern["correlation_type"],
+                        confidence="high",
+                        likely_root_cause=pattern["likely_root_cause"],
+                        recommended_joint_action=pattern["recommended_joint_action"],
+                    ))
+                else:
+                    # Unknown pair — still flag it
+                    correlations.append(Correlation(
+                        location=location_display,
+                        correlation=f"{cat_list[ci]} and {cat_list[cj]} issues detected in same region",
+                        departments=[cat_list[ci], cat_list[cj]],
+                        reason=f"Multiple categories ({len(categories)}) detected in proximity",
+                        correlation_type="unknown",
+                        confidence="medium",
+                        likely_root_cause=f"Possible shared infrastructure or cascading failure between {cat_list[ci]} and {cat_list[cj]}.",
+                        recommended_joint_action=f"Joint inspection by {cat_list[ci]} and {cat_list[cj]} departments recommended.",
+                    ))
+    
     return correlations
 
 
@@ -190,10 +418,30 @@ def run_pipeline(complaints: list[Complaint] | None = None) -> PipelineResult:
         execution_log.append(f"[PREDICTION] {p.category} complaints rising -> escalation likely")
         print(f"[PREDICTION] {p.category} complaints rising -> escalation likely")
 
-    correlations = generate_correlations(complaints)
+    # Predictive Failure Alerts (24-48hr look-ahead)
+    predictive_alerts = generate_predictive_alerts(complaints, clusters)
+    for pa in predictive_alerts:
+        execution_log.append(f"[PREDICTIVE ALERT] {pa.category}: {pa.predicted_failure} (velocity={pa.velocity_score}/hr, horizon={pa.time_horizon_hours}h, confidence={pa.confidence})")
+        print(f"[PREDICTIVE ALERT] {pa.category}: {pa.predicted_failure}")
+        print(f"                   Velocity={pa.velocity_score}/hr | Horizon={pa.time_horizon_hours}h | Confidence={pa.confidence}")
+        # Also create a pipeline Alert for predictive alerts
+        alerts.append(Alert(
+            type="PREDICTIVE_ALERT",
+            message=pa.predicted_failure,
+            severity="HIGH" if pa.time_horizon_hours == 24 else "MEDIUM",
+            area=pa.affected_area,
+        ))
+
+    # Cross-Department Correlations
+    correlations = detect_cross_dept_correlations(complaints)
     for c in correlations:
-        execution_log.append(f"[CORRELATION] Multi-department issue detected in {c.location}: {c.departments}")
-        print(f"[CORRELATION] Multi-department issue detected in {c.location}")
+        corr_type = c.correlation_type or "unknown"
+        execution_log.append(f"[CORRELATION] [{corr_type.upper()}] Multi-department issue in {c.location}: {c.departments}")
+        print(f"[CORRELATION] [{corr_type.upper()}] {c.location}: {c.departments}")
+        if c.likely_root_cause:
+            print(f"              Root Cause: {c.likely_root_cause[:80]}...")
+        if c.recommended_joint_action:
+            print(f"              Action: {c.recommended_joint_action[:80]}...")
 
     city_health = calculate_city_health(complaints, clusters)
     execution_log.append(f"[CITY HEALTH] Score={city_health.score} -> {city_health.status}")
@@ -273,6 +521,7 @@ def run_pipeline(complaints: list[Complaint] | None = None) -> PipelineResult:
         clusters=clusters,
         alerts=alerts,
         predictions=predictions,
+        predictive_alerts=predictive_alerts,
         correlations=correlations,
         city_health=city_health,
         top_risk_area=top_risk_area,

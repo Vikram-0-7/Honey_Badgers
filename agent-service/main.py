@@ -19,10 +19,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+import asyncio
 
 from models.complaint import Complaint, ComplaintSource, PipelineResult
 from services.pipeline import run_pipeline
 from services.mock_data import generate_mock_complaints, generate_mock_officers
+from services.score_decay import run_decay_cycle, apply_score_decay
 
 # ── App Initialization ──
 app = FastAPI(
@@ -218,6 +220,80 @@ async def get_dashboard_stats():
         "category_breakdown": category_counts,
         "severity_breakdown": severity_counts,
     }
+
+
+# ═══════════════════════════════════════════════════
+# SCORE DECAY / CRON ENDPOINTS
+# ═══════════════════════════════════════════════════
+
+@app.post("/cron/score-decay")
+async def trigger_score_decay():
+    """
+    Trigger the impact score decay cycle on all stored pipeline runs.
+    
+    This endpoint can be called manually or by a scheduler (e.g., Vercel Cron).
+    It increases priority scores of unresolved complaints over time and
+    escalates severity levels when age thresholds are crossed.
+    
+    Thresholds:
+    - P4 → P3 after 24 hours
+    - P3 → P2 after 48 hours
+    - P2 → P1 after 72 hours
+    """
+    try:
+        result = run_decay_cycle(pipeline_runs)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Score decay failed: {str(e)}")
+
+
+@app.get("/cron/score-decay/status")
+async def score_decay_status():
+    """Check how many unresolved complaints exist and their age distribution."""
+    if not pipeline_runs:
+        return {"message": "No pipeline data", "total_unresolved": 0}
+    
+    latest = list(pipeline_runs.values())[-1]
+    unresolved_statuses = {"pending", "classified", "assigned", "in_progress"}
+    unresolved = [
+        c for c in latest.complaints
+        if c.status.value in unresolved_statuses
+    ]
+    
+    return {
+        "total_unresolved": len(unresolved),
+        "total_complaints": len(latest.complaints),
+        "unresolved_by_severity": {
+            sev: sum(1 for c in unresolved if c.severity and c.severity.value == sev)
+            for sev in ["P1", "P2", "P3", "P4"]
+        },
+    }
+
+
+# ═══════════════════════════════════════════════════
+# BACKGROUND SCHEDULER
+# ═══════════════════════════════════════════════════
+
+async def score_decay_scheduler():
+    """
+    Background task that runs the score decay cycle every 30 minutes.
+    Started automatically when the server boots.
+    """
+    while True:
+        await asyncio.sleep(1800)  # 30 minutes
+        if pipeline_runs:
+            print("\n[SCHEDULER] Running automatic score decay cycle...")
+            try:
+                run_decay_cycle(pipeline_runs)
+            except Exception as e:
+                print(f"[SCHEDULER] Score decay error: {e}")
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Launch background tasks on server startup."""
+    asyncio.create_task(score_decay_scheduler())
+    print("[STARTUP] Score decay scheduler started (runs every 30 minutes)")
 
 
 # ═══════════════════════════════════════════════════

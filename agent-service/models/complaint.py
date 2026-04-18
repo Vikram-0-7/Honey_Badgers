@@ -45,11 +45,27 @@ class Prediction(BaseModel):
     confidence: str
 
 
+class PredictiveAlert(BaseModel):
+    """Velocity-based predictive failure alert (24-48hr look-ahead)."""
+    category: str
+    predicted_failure: str
+    time_horizon_hours: int = Field(description="24 or 48 — how far ahead the prediction looks")
+    confidence: str = Field(description="high, medium, or low")
+    velocity_score: float = Field(description="Complaints per hour rate")
+    trigger_reason: str
+    affected_area: Optional[str] = None
+    severity_weight: float = Field(default=0.0, description="Weighted severity score of contributing complaints")
+
+
 class Correlation(BaseModel):
     location: str
     correlation: str
     departments: List[str]
     reason: str
+    correlation_type: Optional[str] = Field(default=None, description="construction_damage | shared_infrastructure | cascading_failure")
+    confidence: Optional[str] = Field(default=None, description="high, medium, or low")
+    likely_root_cause: Optional[str] = Field(default=None)
+    recommended_joint_action: Optional[str] = Field(default=None)
 
 
 class CityHealth(BaseModel):
@@ -124,6 +140,11 @@ class Complaint(BaseModel):
     reason: Optional[str] = Field(default=None, description="Explanation for agent logic")
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
     updated_at: Optional[str] = Field(default=None)
+
+    # Verification fields (for citizen verification loop)
+    verification_photo_url: Optional[str] = Field(default=None)
+    verification_status: Optional[str] = Field(default=None, description="verified | reopened")
+    verification_feedback: Optional[str] = Field(default=None)
     agent_notes: dict = Field(default_factory=dict)
 
 
@@ -170,6 +191,7 @@ class PipelineResult(BaseModel):
     clusters: List[Cluster]
     alerts: List[Alert] = Field(default_factory=list)
     predictions: List[Prediction] = Field(default_factory=list)
+    predictive_alerts: List[PredictiveAlert] = Field(default_factory=list)
     correlations: List[Correlation] = Field(default_factory=list)
     city_health: Optional[CityHealth] = None
     top_risk_area: Optional[TopRiskArea] = None
