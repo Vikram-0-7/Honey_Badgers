@@ -13,7 +13,6 @@ def generate_mock_complaints() -> list[Complaint]:
     These simulate real-world citizen grievances covering multiple categories.
     """
     raw_complaints = [
-        
     ]
 
     return [Complaint(**data) for data in raw_complaints]

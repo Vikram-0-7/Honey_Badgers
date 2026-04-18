@@ -1,16 +1,25 @@
 "use client";
 
-import PageHeader from "@/components/ui/PageHeader";
-import MapPlaceholder from "@/components/ui/MapPlaceholder";
-import Card from "@/components/ui/Card";
 import { useState } from "react";
-import { createClient } from "@/libs/supabase/client";
 import { useRouter } from "next/navigation";
+import PageHeader from "@/components/ui/PageHeader";
+import Card from "@/components/ui/Card";
+import { createClient } from "@/libs/supabase/client";
+import dynamic from "next/dynamic";
+
+const MapPicker = dynamic(() => import("@/components/MapPicker"), {
+  ssr: false,
+});
 
 export default function SubmitComplaint() {
   const router = useRouter();
-  const [mode, setMode] = useState<"manual" | "image" | "voice">("manual");
-  const [text, setText] = useState("");
+
+  const [mode, setMode] = useState<"form" | "image" | "audio">("form");
+  const [description, setDescription] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [lat, setLat] = useState<number | null>(null);
+  const [lng, setLng] = useState<number | null>(null);
+
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState<"idle" | "analyzing" | "done">("idle");
   const [statusMsg, setStatusMsg] = useState("");
@@ -18,124 +27,150 @@ export default function SubmitComplaint() {
   const handleSubmit = async () => {
     const supabase = await createClient();
 
-    if (!text) return alert("Enter complaint");
+    if (mode === "form" && !description) return alert("Enter complaint");
+    if (mode !== "form" && !file) return alert("Upload file");
+    if (!lat || !lng) return alert("Select location");
 
     setLoading(true);
     setStep("analyzing");
 
-    setStatusMsg("Analyzing complaint...");
-    await new Promise((r) => setTimeout(r, 1000));
+    try {
+      setStatusMsg("Uploading & extracting text...");
+      let finalDescription = description;
 
-    setStatusMsg("Detecting clusters...");
-    await new Promise((r) => setTimeout(r, 1000));
+      // 1️⃣ Extract text if file
+      if (mode !== "form" && file) {
+        const formData = new FormData();
+        formData.append("mode", mode);
+        formData.append("latitude", String(lat));
+        formData.append("longitude", String(lng));
+        formData.append("file", file);
 
-    setStatusMsg("Generating insights...");
-    await new Promise((r) => setTimeout(r, 1000));
+        const res = await fetch("/api/complaints", {
+          method: "POST",
+          body: formData,
+        });
+        const data = await res.json();
+        if (!data.success) throw new Error("Upload failed");
+        
+        finalDescription = data.complaint.text;
+        // The old route already saved the complaint, but we'll let the new flow run anyway.
+        // We can just use the returned text.
+      }
 
-    const res = await fetch("/api/launch-agent", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        text,
-        location: "Madhapur",
-        source: "portal",
-      }),
-    });
+      setStatusMsg("Analyzing complaint...");
+      await new Promise((r) => setTimeout(r, 1000));
 
-    const data = await res.json();
+      setStatusMsg("Detecting clusters...");
+      await new Promise((r) => setTimeout(r, 1000));
 
-    const analyzeData = data.data;
-    // const pipelineData = data.pipelineData;
+      setStatusMsg("Generating insights...");
+      await new Promise((r) => setTimeout(r, 1000));
 
-    console.log("API RESPONSE:", data);
-
-    const runId = analyzeData.pipeline_run_id;
-
-    // ✅ 1. Insert pipeline run
-    await supabase.from("pipeline_runs").insert({
-      id: runId,
-      message: analyzeData.message,
-      total_complaints: analyzeData.total_complaints,
-      total_clusters: analyzeData.total_clusters,
-      city_health_score: analyzeData.city_health.score,
-      city_health_status: analyzeData.city_health.status,
-      top_risk_area: analyzeData.top_risk_area.area,
-      top_risk_reason: analyzeData.top_risk_area.reason,
-      most_affected_category: analyzeData.most_affected_category.category,
-    });
-
-    // ✅ 2. Insert complaints
-    for (const c of analyzeData.complaints) {
-      await supabase.from("complaints").insert({
-        id: c.id,
-        text: c.text,
-        latitude: c.latitude,
-        longitude: c.longitude,
-        source: c.source,
-        category: c.category,
-        severity: c.severity,
-        priority_score: c.priority_score,
-        officer_name: c.officer_name,
-        sla_status: c.sla_status,
-        status: c.status,
+      const res = await fetch("/api/launch-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: finalDescription,
+          location: `${lat},${lng}`,
+          latitude: lat,
+          longitude: lng,
+          source: mode,
+        }),
       });
-    }
 
-    // ✅ 3. Insert officer assignments
-    for (const a of analyzeData.officer_assignments) {
-      await supabase.from("officer_assignments").insert({
-        complaint_id: a.complaint_id,
+      const data = await res.json();
+      const analyzeData = data.data;
+
+      console.log("API RESPONSE:", data);
+
+      if (!analyzeData?.pipeline_run_id) {
+         throw new Error("Agent analysis failed");
+      }
+
+      const runId = analyzeData.pipeline_run_id;
+
+      // ✅ 1. Insert pipeline run
+      await supabase.from("pipeline_runs").insert({
+        id: runId,
+        message: analyzeData.message,
+        total_complaints: analyzeData.total_complaints,
+        total_clusters: analyzeData.total_clusters,
+        city_health_score: analyzeData.city_health?.score || 0,
+        city_health_status: analyzeData.city_health?.status || "Unknown",
+        top_risk_area: analyzeData.top_risk_area?.area || "Unknown",
+        top_risk_reason: analyzeData.top_risk_area?.reason || "Unknown",
+        most_affected_category: analyzeData.most_affected_category?.category || "Unknown",
+      });
+
+      // ✅ 2. Insert complaints
+      for (const c of analyzeData.complaints) {
+        // Upsert to handle the one we might have already inserted via /api/complaints
+        await supabase.from("complaints").upsert({
+          id: c.id,
+          text: c.text,
+          latitude: c.latitude,
+          longitude: c.longitude,
+          source: c.source || "portal",
+          category: c.category,
+          severity: c.severity,
+          priority_score: c.priority_score,
+          officer_name: c.officer_name,
+          sla_status: c.sla_status,
+          status: c.status,
+        });
+      }
+
+      // ✅ 3. Insert officer assignments
+      for (const a of analyzeData.officer_assignments) {
+        await supabase.from("officer_assignments").insert({
+          complaint_id: a.complaint_id,
+          pipeline_run_id: runId,
+          officer_id: a.officer_id,
+          officer_name: a.officer_name,
+          category: a.category,
+          severity: a.severity,
+          sla_deadline_hours: a.sla_deadline_hours,
+          assigned_at: a.assigned_at,
+          status: a.status,
+        });
+      }
+
+      // ✅ 4. Insert system summary
+      await supabase.from("system_summary").insert({
         pipeline_run_id: runId,
-        officer_id: a.officer_id,
-        officer_name: a.officer_name,
-        category: a.category,
-        severity: a.severity,
-        sla_deadline_hours: a.sla_deadline_hours,
-        assigned_at: a.assigned_at,
-        status: a.status,
+        total_complaints: analyzeData.system_summary?.total_complaints || 0,
+        critical_issues: analyzeData.system_summary?.critical_issues || 0,
+        clusters: analyzeData.system_summary?.clusters || 0,
+        top_risk_area: analyzeData.system_summary?.top_risk_area || "Unknown",
+        city_health_score: analyzeData.system_summary?.city_health_score || 0,
       });
+
+      // ✅ 5. Insert logs
+      for (const log of analyzeData.execution_log) {
+        await supabase.from("execution_logs").insert({
+          pipeline_run_id: runId,
+          log,
+        });
+      }
+
+      // The newly created complaint is typically the last one added to the mock data
+      const newComplaintId = analyzeData.complaints[analyzeData.complaints.length - 1].id;
+
+      setLoading(false);
+      setStep("done");
+      router.push(`/portal/track/${newComplaintId}`);
+    } catch (err: any) {
+      console.error(err);
+      alert("Error: " + err.message);
+      setLoading(false);
+      setStep("idle");
     }
-
-    // ✅ 4. Insert system summary
-    await supabase.from("system_summary").insert({
-      pipeline_run_id: runId,
-      total_complaints: analyzeData.system_summary.total_complaints,
-      critical_issues: analyzeData.system_summary.critical_issues,
-      clusters: analyzeData.system_summary.clusters,
-      top_risk_area: analyzeData.system_summary.top_risk_area,
-      city_health_score: analyzeData.system_summary.city_health_score,
-    });
-
-    // ✅ 5. Insert logs
-    for (const log of analyzeData.execution_log) {
-      await supabase.from("execution_logs").insert({
-        pipeline_run_id: runId,
-        log,
-      });
-    }
-
-    const complientId = analyzeData.complaints[0].id;
-
-    setLoading(false);
-    setStep("done");
-    router.push(`/portal/track/${complientId}`);
   };
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-12">
-      <PageHeader title="New Report" subtitle="AI will categorize and dispatch" />
-
-      <div className="flex gap-4 mb-8">
-        {["1. Details", "2. Location", "3. Uploads", "4. Review"].map((stepName, i) => (
-          <div
-            key={i}
-            className={`flex-1 text-[10px] font-bold uppercase tracking-widest border-b-2 pb-2 ${i === 0 ? "border-black text-black" : "border-black/10 text-black/40"
-              }`}
-          >
-            {stepName}
-          </div>
-        ))}
-      </div>
+      <PageHeader title="New Report" subtitle="Select input mode" />
 
       {/* 🔥 LOADING STATE */}
       {step === "analyzing" && (
@@ -149,45 +184,57 @@ export default function SubmitComplaint() {
       {/* NORMAL UI */}
       {step !== "analyzing" && (
         <>
+          {/* MODE SWITCH */}
+          <div className="flex gap-4 mb-6">
+            {["form", "image", "audio"].map((m) => (
+              <button
+                key={m}
+                onClick={() => setMode(m as any)}
+                className={`flex-1 border px-4 py-2 text-xs font-bold uppercase ${
+                  mode === m ? "bg-black text-white" : ""
+                }`}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+
           <Card className="mb-8">
             <label className="text-xs font-bold uppercase tracking-widest block mb-4">
               Describe the issue
             </label>
 
-            <div className="flex gap-2 mb-4">
-              {["manual", "image", "voice"].map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setMode(m as any)}
-                  className={`px-3 py-2 text-xs font-bold uppercase border ${mode === m
-                    ? "bg-black text-white border-black"
-                    : "border-black/20 text-black/60"
-                    }`}
-                >
-                  {m}
-                </button>
-              ))}
-            </div>
+            {mode === "form" && (
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="w-full border p-4 text-sm outline-none focus:border-black h-32 bg-gray-50"
+                placeholder="E.g. The streetlight is broken..."
+              />
+            )}
 
-            <textarea
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              className="w-full border p-4 text-sm outline-none focus:border-black h-32 bg-gray-50"
-              placeholder="E.g. The streetlight is broken..."
-            />
+            {(mode === "image" || mode === "audio") && (
+              <input
+                type="file"
+                className="w-full text-sm"
+                accept={mode === "image" ? "image/*" : "audio/*"}
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+              />
+            )}
           </Card>
 
           <Card className="mb-8">
             <div className="flex justify-between items-center mb-4">
               <label className="text-xs font-bold uppercase tracking-widest">
-                Location Detected
+                Location
               </label>
-              <span className="bg-black text-white px-2 py-1 text-[10px] font-bold uppercase">
-                Zone Alpha
-              </span>
             </div>
-            <MapPlaceholder height="h-48" />
+            <MapPicker
+              onSelect={(coords: any) => {
+                setLat(coords.lat);
+                setLng(coords.lng);
+              }}
+            />
           </Card>
 
           <div className="flex justify-end gap-4 mt-8">

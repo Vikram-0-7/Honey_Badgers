@@ -10,8 +10,8 @@ export default function FeatureHighlight() {
         <p className="mb-12 text-lg font-medium tracking-widest uppercase text-white/50">
           Limited pilot deployments for smart cities.
         </p>
-        <Link 
-          href="/login" 
+        <Link
+          href="/login"
           className="inline-flex items-center justify-center bg-white px-10 py-5 text-sm font-bold uppercase tracking-widest text-black transition-all hover:bg-white/80"
         >
           Request Access

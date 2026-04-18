@@ -2,13 +2,20 @@ import PageHeader from "@/components/ui/PageHeader";
 import Timeline from "@/components/ui/Timeline";
 import StatusBadge from "@/components/ui/StatusBadge";
 import Card from "@/components/ui/Card";
-import MapPlaceholder from "@/components/ui/MapPlaceholder";
+import DynamicComplaintMap from "@/components/DynamicComplaintMap";
 import { createClient } from "@/libs/supabase/server";
 
-// ✅ Fetch data from Supabase
 async function getTrackingData(complaintId: string) {
   const supabase = await createClient();
-  // 1️⃣ Officer Assignment
+  
+  // 1️⃣ Complaint Details
+  const { data: complaint } = await supabase
+    .from("complaints")
+    .select("*")
+    .eq("id", complaintId)
+    .single();
+
+  // 2️⃣ Officer Assignment
   const { data: assignment, error: assignmentError } = await supabase
     .from("officer_assignments")
     .select("*")
@@ -17,17 +24,18 @@ async function getTrackingData(complaintId: string) {
 
   if (assignmentError) {
     console.error("Assignment error:", assignmentError);
-    return null;
   }
 
-  // 2️⃣ Cluster (based on category)
+  // 3️⃣ Cluster (based on category)
   const { data: cluster } = await supabase
     .from("clusters")
     .select("*")
-    .eq("category", assignment.category)
+    .eq("category", assignment?.category || complaint?.category)
+    .limit(1)
     .single();
 
   return {
+    complaint,
     assignment,
     cluster,
   };
@@ -38,36 +46,32 @@ export default async function Track({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  // ✅ FIX: unwrap params
   const { id } = await params;
-
   const data = await getTrackingData(id);
 
-  if (!data) {
+  if (!data?.complaint && !data?.assignment) {
     return (
-      <div className="p-10 text-center text-red-500">
-        No tracking data found
+      <div className="p-10 text-center text-red-500 font-bold uppercase">
+        No tracking data found for ID: {id}
       </div>
     );
   }
 
-  const { assignment, cluster } = data;
+  const { complaint, assignment, cluster } = data;
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-12">
-
-      {/* Header */}
+      {/* HEADER */}
       <div className="mb-8 flex justify-between items-start">
         <PageHeader
-          title={`Track ${id}`}
-          subtitle={assignment.category || "Complaint"}
+          title={`Track ${id.split('-')[0]}`}
+          subtitle={complaint?.category || assignment?.category || "Complaint"}
         />
-        <StatusBadge status={assignment.status || "Pending"} />
+        <StatusBadge status={complaint?.status || assignment?.status || "Pending"} />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-
-        {/* Timeline */}
+        {/* TIMELINE */}
         <div>
           <h3 className="text-sm font-black uppercase mb-6">
             Resolution Timeline
@@ -77,47 +81,43 @@ export default async function Track({
             events={[
               {
                 title: "Complaint Submitted",
-                date: "Auto",
-                description: "Citizen reported issue",
+                date: complaint?.created_at ? new Date(complaint.created_at).toLocaleString() : "Auto",
+                description: "Citizen reported issue via " + (complaint?.source || "portal"),
               },
               {
                 title: "Cluster Identified",
-                date: cluster?.created_at || "Auto",
-                description: `${cluster?.category} - ${cluster?.root_cause}`,
+                date: cluster?.created_at ? new Date(cluster.created_at).toLocaleString() : "Auto",
+                description: cluster ? `${cluster.category} - ${cluster.root_cause}` : "Isolated incident",
               },
               {
                 title: "Assigned to Officer",
-                date: assignment.assigned_at,
-                description: `Officer: ${assignment.officer_name}`,
+                date: assignment?.assigned_at ? new Date(assignment.assigned_at).toLocaleString() : "Pending",
+                description: assignment ? `Officer: ${assignment.officer_name}` : "Pending assignment",
               },
               {
                 title: "Expected Resolution (SLA)",
-                date: `${assignment.sla_deadline_hours} hrs`,
-                description: `Severity: ${assignment.severity}`,
+                date: assignment?.sla_deadline_hours ? `${assignment.sla_deadline_hours} hrs` : "N/A",
+                description: `Severity: ${assignment?.severity || complaint?.severity || "N/A"}`,
               },
             ]}
           />
         </div>
 
-        {/* Right Side */}
+        {/* RIGHT DETAILS */}
         <div className="space-y-6">
-
           {/* Cluster Info */}
           <Card>
             <h4 className="text-xs font-bold uppercase tracking-widest mb-4 border-b border-black/10 pb-2">
               Cluster Info
             </h4>
-
             <p className="text-sm mb-2">
               <span className="opacity-50">Category:</span>{" "}
-              {cluster?.category || "N/A"}
+              {cluster?.category || complaint?.category || "N/A"}
             </p>
-
             <p className="text-sm mb-2">
               <span className="opacity-50">Root Cause:</span>{" "}
-              {cluster?.root_cause || "N/A"}
+              {cluster?.root_cause || "Pending Analysis"}
             </p>
-
             <p className="text-sm">
               <span className="opacity-50">Confidence:</span>{" "}
               {cluster?.confidence || "N/A"}
@@ -129,34 +129,35 @@ export default async function Track({
             <h4 className="text-xs font-bold uppercase tracking-widest mb-4 border-b border-black/10 pb-2">
               Officer Assignment
             </h4>
-
             <p className="text-sm mb-2">
               <span className="opacity-50">Officer:</span>{" "}
-              {assignment.officer_name}
+              {assignment?.officer_name || complaint?.officer_name || "Unassigned"}
             </p>
-
             <p className="text-sm mb-2">
               <span className="opacity-50">Department:</span>{" "}
-              {assignment.category}
+              {assignment?.category || "N/A"}
             </p>
-
             <p className="text-sm mb-2">
               <span className="opacity-50">Severity:</span>{" "}
-              {assignment.severity}
+              {assignment?.severity || complaint?.severity || "N/A"}
             </p>
-
             <p className="text-sm mb-2">
               <span className="opacity-50">Assigned At:</span>{" "}
-              {assignment.assigned_at}
+              {assignment?.assigned_at || "N/A"}
             </p>
-
             <p className="text-sm">
               <span className="opacity-50">SLA:</span>{" "}
-              {assignment.sla_deadline_hours} hrs
+              {assignment?.sla_deadline_hours ? `${assignment.sla_deadline_hours} hrs` : "N/A"}
             </p>
           </Card>
 
-          <MapPlaceholder height="h-64" />
+          {/* MAP */}
+          {(complaint?.latitude && complaint?.longitude) && (
+            <DynamicComplaintMap
+              lat={complaint.latitude}
+              lng={complaint.longitude}
+            />
+          )}
         </div>
       </div>
     </div>

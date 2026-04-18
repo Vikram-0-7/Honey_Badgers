@@ -5,6 +5,7 @@ import Process from "@/components/Process";
 import FeatureHighlight from "@/components/FeatureHighlight";
 import Footer from "@/components/Footer";
 
+
 export default function Home() {
   return (
     <>
@@ -14,6 +15,7 @@ export default function Home() {
         <Services />
         <Process />
         <FeatureHighlight />
+
       </main>
       <Footer />
     </>
