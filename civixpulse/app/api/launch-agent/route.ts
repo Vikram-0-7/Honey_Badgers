@@ -10,7 +10,7 @@ export async function POST(req: Request) {
 
         const body = await req.json();
 
-        // 🔥 send to FastAPI
+        // 🔥 Call FastAPI
         const response = await fetch("http://127.0.0.1:8000/agent/analyze", {
             method: "POST",
             headers: {
@@ -20,6 +20,7 @@ export async function POST(req: Request) {
         });
 
         const data = await response.json();
+        console.log("/analyze route response: ", data);
 
         // 🔥 Send email via Resend if user is logged in
         if (user?.email) {
@@ -49,19 +50,22 @@ export async function POST(req: Request) {
             }).catch(e => console.error("Failed to send email:", e));
         }
 
-        // 🔥 trigger pipeline async (no await block)
-        fetch("http://127.0.0.1:8000/run-pipeline").catch(() => { });
+        // 🔁 Call pipeline trigger
+        const pipelineResponse = await fetch("http://127.0.0.1:8000/run-pipeline");
+        const pipelineData = await pipelineResponse.json();
+        console.log("/run-pipeline route response: ", pipelineData);
 
         return Response.json({
             success: true,
             data,
+            pipelineData,
         });
 
     } catch (err: any) {
         console.error(err);
 
         return Response.json({
-            error: "Agent failed",
+            error: err.message || "Agent failed",
         });
     }
 }

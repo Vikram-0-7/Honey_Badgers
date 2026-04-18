@@ -1,138 +1,166 @@
-"use client";
-
-import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
-import dynamic from "next/dynamic";
-
 import PageHeader from "@/components/ui/PageHeader";
+import Timeline from "@/components/ui/Timeline";
 import StatusBadge from "@/components/ui/StatusBadge";
 import Card from "@/components/ui/Card";
-import Timeline from "@/components/ui/Timeline";
+import dynamic from "next/dynamic";
+import { createClient } from "@/libs/supabase/server";
 
 const ComplaintMap = dynamic(() => import("@/components/ComplaintMap"), {
   ssr: false,
 });
 
-export default function Track() {
-  const { id } = useParams();
-  const [complaint, setComplaint] = useState<any>(null);
+async function getTrackingData(complaintId: string) {
+  const supabase = await createClient();
+  
+  // 1️⃣ Complaint Details
+  const { data: complaint } = await supabase
+    .from("complaints")
+    .select("*")
+    .eq("id", complaintId)
+    .single();
 
-  useEffect(() => {
-    async function fetchData() {
-      const res = await fetch(`/api/complaints/${id}`);
-      const data = await res.json();
-      setComplaint(data.complaint);
-    }
+  // 2️⃣ Officer Assignment
+  const { data: assignment, error: assignmentError } = await supabase
+    .from("officer_assignments")
+    .select("*")
+    .eq("complaint_id", complaintId)
+    .single();
 
-    if (id) fetchData();
-  }, [id]);
+  if (assignmentError) {
+    console.error("Assignment error:", assignmentError);
+  }
 
-  if (!complaint) {
+  // 3️⃣ Cluster (based on category)
+  const { data: cluster } = await supabase
+    .from("clusters")
+    .select("*")
+    .eq("category", assignment?.category || complaint?.category)
+    .limit(1)
+    .single();
+
+  return {
+    complaint,
+    assignment,
+    cluster,
+  };
+}
+
+export default async function Track({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const data = await getTrackingData(id);
+
+  if (!data?.complaint && !data?.assignment) {
     return (
-      <div className="p-10 text-center font-bold uppercase">
-        Loading...
+      <div className="p-10 text-center text-red-500 font-bold uppercase">
+        No tracking data found for ID: {id}
       </div>
     );
   }
 
-  // 🔥 Timeline (important for your system vision)
-  const timelineEvents = [
-    {
-      title: "Report Submitted",
-      date: new Date(complaint.created_at).toLocaleString(),
-      description: "Citizen submitted complaint via portal",
-    },
-    {
-      title: "System Logged",
-      date: new Date(complaint.created_at).toLocaleString(),
-      description: `Source: ${complaint.source}`,
-    },
-    {
-      title: "Current Status",
-      date: new Date().toLocaleString(),
-      description: complaint.status,
-    },
-  ];
+  const { complaint, assignment, cluster } = data;
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-12">
-
       {/* HEADER */}
       <div className="mb-8 flex justify-between items-start">
         <PageHeader
-          title={`Track ${complaint.id}`}
-          subtitle={complaint.text}
+          title={`Track ${id.split('-')[0]}`}
+          subtitle={complaint?.category || assignment?.category || "Complaint"}
         />
-        <StatusBadge status={complaint.status} />
+        <StatusBadge status={complaint?.status || assignment?.status || "Pending"} />
       </div>
 
-      {/* GRID */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-
-        {/* LEFT → TIMELINE */}
+        {/* TIMELINE */}
         <div>
           <h3 className="text-sm font-black uppercase mb-6">
             Resolution Timeline
           </h3>
 
-          <Timeline events={timelineEvents} />
+          <Timeline
+            events={[
+              {
+                title: "Complaint Submitted",
+                date: complaint?.created_at ? new Date(complaint.created_at).toLocaleString() : "Auto",
+                description: "Citizen reported issue via " + (complaint?.source || "portal"),
+              },
+              {
+                title: "Cluster Identified",
+                date: cluster?.created_at ? new Date(cluster.created_at).toLocaleString() : "Auto",
+                description: cluster ? `${cluster.category} - ${cluster.root_cause}` : "Isolated incident",
+              },
+              {
+                title: "Assigned to Officer",
+                date: assignment?.assigned_at ? new Date(assignment.assigned_at).toLocaleString() : "Pending",
+                description: assignment ? `Officer: ${assignment.officer_name}` : "Pending assignment",
+              },
+              {
+                title: "Expected Resolution (SLA)",
+                date: assignment?.sla_deadline_hours ? `${assignment.sla_deadline_hours} hrs` : "N/A",
+                description: `Severity: ${assignment?.severity || complaint?.severity || "N/A"}`,
+              },
+            ]}
+          />
         </div>
 
-        {/* RIGHT → DETAILS */}
+        {/* RIGHT DETAILS */}
         <div className="space-y-6">
-
-          {/* DETAILS CARD */}
+          {/* Cluster Info */}
           <Card>
-            <h4 className="text-xs font-bold uppercase tracking-widest mb-4 border-b pb-2">
-              Complaint Info
+            <h4 className="text-xs font-bold uppercase tracking-widest mb-4 border-b border-black/10 pb-2">
+              Cluster Info
             </h4>
-
             <p className="text-sm mb-2">
-              <span className="opacity-50">Category:</span> {complaint.category || "General"}
+              <span className="opacity-50">Category:</span>{" "}
+              {cluster?.category || complaint?.category || "N/A"}
             </p>
-
             <p className="text-sm mb-2">
-              <span className="opacity-50">Severity:</span> {complaint.severity || "Medium"}
+              <span className="opacity-50">Root Cause:</span>{" "}
+              {cluster?.root_cause || "Pending Analysis"}
             </p>
-
-            <p className="text-sm mb-2">
-              <span className="opacity-50">Priority Score:</span> {complaint.priority_score ?? "N/A"}
-            </p>
-
             <p className="text-sm">
-              <span className="opacity-50">Source:</span> {complaint.source}
+              <span className="opacity-50">Confidence:</span>{" "}
+              {cluster?.confidence || "N/A"}
             </p>
           </Card>
 
-          {/* OFFICER / SLA */}
+          {/* Officer Assignment */}
           <Card>
-            <h4 className="text-xs font-bold uppercase tracking-widest mb-4 border-b pb-2">
-              Assignment
+            <h4 className="text-xs font-bold uppercase tracking-widest mb-4 border-b border-black/10 pb-2">
+              Officer Assignment
             </h4>
-
             <p className="text-sm mb-2">
               <span className="opacity-50">Officer:</span>{" "}
-              {complaint.officer_name || "Not assigned"}
+              {assignment?.officer_name || complaint?.officer_name || "Unassigned"}
             </p>
-
+            <p className="text-sm mb-2">
+              <span className="opacity-50">Department:</span>{" "}
+              {assignment?.category || "N/A"}
+            </p>
+            <p className="text-sm mb-2">
+              <span className="opacity-50">Severity:</span>{" "}
+              {assignment?.severity || complaint?.severity || "N/A"}
+            </p>
+            <p className="text-sm mb-2">
+              <span className="opacity-50">Assigned At:</span>{" "}
+              {assignment?.assigned_at || "N/A"}
+            </p>
             <p className="text-sm">
-              <span className="opacity-50">SLA Status:</span>{" "}
-              {complaint.sla_status || "Pending"}
+              <span className="opacity-50">SLA:</span>{" "}
+              {assignment?.sla_deadline_hours ? `${assignment.sla_deadline_hours} hrs` : "N/A"}
             </p>
           </Card>
 
           {/* MAP */}
-          <ComplaintMap
-            lat={complaint.latitude}
-            lng={complaint.longitude}
-          />
-
-          {/* COORDS */}
-          {complaint.latitude && (
-            <p className="text-xs font-bold">
-              {complaint.latitude.toFixed(4)},{" "}
-              {complaint.longitude?.toFixed(4)}
-            </p>
+          {(complaint?.latitude && complaint?.longitude) && (
+            <ComplaintMap
+              lat={complaint.latitude}
+              lng={complaint.longitude}
+            />
           )}
         </div>
       </div>
