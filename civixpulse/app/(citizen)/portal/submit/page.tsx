@@ -84,11 +84,15 @@ export default function SubmitComplaint() {
 
       console.log("API RESPONSE:", data);
 
+      const { data: { user } } = await supabase.auth.getUser();
+      
       if (!analyzeData?.pipeline_run_id) {
          throw new Error("Agent analysis failed");
       }
 
       const runId = analyzeData.pipeline_run_id;
+      // The newly created complaint is typically the last one added to the mock data
+      const newComplaintId = analyzeData.complaints[analyzeData.complaints.length - 1].id;
 
       // ✅ 1. Insert pipeline run
       await supabase.from("pipeline_runs").insert({
@@ -106,7 +110,7 @@ export default function SubmitComplaint() {
       // ✅ 2. Insert complaints
       for (const c of analyzeData.complaints) {
         // Upsert to handle the one we might have already inserted via /api/complaints
-        await supabase.from("complaints").upsert({
+        const complaintData: any = {
           id: c.id,
           text: c.text,
           latitude: c.latitude,
@@ -118,7 +122,14 @@ export default function SubmitComplaint() {
           officer_name: c.officer_name,
           sla_status: c.sla_status,
           status: c.status,
-        });
+        };
+        
+        // Attach citizen_id ONLY for the newly created complaint, leaving mock data unassigned
+        if (c.id === newComplaintId) {
+            complaintData.citizen_id = user?.id;
+        }
+
+        await supabase.from("complaints").upsert(complaintData);
       }
 
       // ✅ 3. Insert officer assignments
@@ -155,7 +166,7 @@ export default function SubmitComplaint() {
       }
 
       // The newly created complaint is typically the last one added to the mock data
-      const newComplaintId = analyzeData.complaints[analyzeData.complaints.length - 1].id;
+      // newComplaintId was already declared above
 
       setLoading(false);
       setStep("done");
