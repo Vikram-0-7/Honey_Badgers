@@ -265,7 +265,7 @@ def run_pipeline(complaints: list[Complaint] | None = None) -> PipelineResult:
 
     print()
 
-    return PipelineResult(
+    result= PipelineResult(
         message="Pipeline executed successfully",
         total_complaints=len(complaints),
         total_clusters=len(clusters),
@@ -281,3 +281,4 @@ def run_pipeline(complaints: list[Complaint] | None = None) -> PipelineResult:
         officer_assignments=assignments,
         execution_log=execution_log,
     )
+    return result
