@@ -1,7 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
 import { createClient } from "@/libs/supabase/server";
+import Tesseract from "tesseract.js";
+import { extractAudioText } from "@/libs/ai/whisper";
 
+// ---- OCR FUNCTION
+async function extractImageText(file: File) {
+    try {
+        const buffer = Buffer.from(await file.arrayBuffer());
+
+        const { data } = await Tesseract.recognize(buffer, "eng", {
+            logger: (m) => console.log("[OCR]", m.status, m.progress),
+        });
+
+        return data.text?.trim() || null;
+    } catch (err) {
+        console.error("OCR failed:", err);
+        return null;
+    }
+}
+
+// ---- MAIN API
 export async function POST(req: NextRequest) {
     try {
         const supabase = await createClient();
@@ -14,17 +33,45 @@ export async function POST(req: NextRequest) {
         let description = formData.get("description") as string | null;
         const file = formData.get("file") as File | null;
 
+        // 🔐 AUTH
         const {
             data: { user },
         } = await supabase.auth.getUser();
 
         if (!user) {
-            return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+            return NextResponse.json(
+                { error: "Unauthorized - Please login" },
+                { status: 401 }
+            );
         }
 
-        if (mode === "image") description = "Image complaint uploaded";
-        if (mode === "audio") description = "Audio complaint uploaded";
-        if (!description) description = "No description provided";
+        // =========================
+        // 🔥 MODE HANDLING
+        // =========================
+
+        // 🖼️ IMAGE → OCR
+        if (mode === "image" && file) {
+            console.log("Processing image OCR...");
+            const text = await extractImageText(file);
+
+            description = text || "Image uploaded (OCR failed)";
+        }
+
+        // 🔊 AUDIO → Process via Whisper (Groq)
+        if (mode === "audio" && file) {
+            console.log("Processing audio via Groq Whisper...");
+            const text = await extractAudioText(file);
+            description = text || "Audio complaint uploaded (transcription failed)";
+        }
+
+        // 📝 FORM → already handled
+        if (!description) {
+            description = "No description provided";
+        }
+
+        // =========================
+        // 📦 BUILD DB OBJECT
+        // =========================
 
         const complaint = {
             id: uuidv4(),
@@ -42,16 +89,32 @@ export async function POST(req: NextRequest) {
             created_at: new Date().toISOString(),
         };
 
+        // =========================
+        // 💾 SAVE TO SUPABASE
+        // =========================
+
         const { error } = await supabase
             .from("complaints")
             .insert([complaint]);
 
-        if (error) throw error;
+        if (error) {
+            console.error("DB ERROR:", error);
+            throw error;
+        }
 
-        return NextResponse.json({ success: true, complaint });
+        console.log("Complaint saved:", complaint.id);
+
+        return NextResponse.json({
+            success: true,
+            complaint,
+        });
 
     } catch (err) {
-        console.error(err);
-        return NextResponse.json({ error: "Failed" }, { status: 500 });
+        console.error("API ERROR:", err);
+
+        return NextResponse.json(
+            { error: "Failed to submit complaint" },
+            { status: 500 }
+        );
     }
 }
